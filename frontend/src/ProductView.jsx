@@ -4,7 +4,8 @@ import AgentCards from "./AgentCards.jsx";
 import Plot from "./Plot.jsx";
 import { TIER_ACTION, TIER_LABEL, boundNote, eur, pct } from "./format.js";
 
-const BLUE = "#2f6db5", ORANGE = "#d9822b", GREY = "#9aa5b1", GREEN = "#2e8b57";
+const BLUE = "#2f6db5", ORANGE = "#d9822b", GREY = "#7b8794", GREEN = "#2e8b57";
+const NAVY = "#14213d", BARS = "#c3c9d1", RED = "#d62828";
 
 // Daily rows are mostly 0 to 3 units, so the charts use weekly totals (7 days each).
 function weekly(h) {
@@ -49,13 +50,14 @@ export default function ProductView({ id, market }) {
     return {
       data: [
         { type: "bar", x: weeks.map((w) => w.date), y: weeks.map((w) => w.units), name: "Units sold per week",
-          marker: { color: "#c5d6ea" }, yaxis: "y" },
+          marker: { color: BARS }, yaxis: "y", hovertemplate: "%{y} units" },
         { type: "scatter", mode: "lines", x: m.history.date, y: m.history.price, name: "Price", yaxis: "y2",
-          line: { color: BLUE, width: 2, shape: "hv" } },
+          line: { color: NAVY, width: 2.5, shape: "hv" }, hovertemplate: "€%{y:.2f}" },
         { type: "scatter", mode: "markers", x: promoDays.map((i) => m.history.date[i]), y: promoDays.map((i) => m.history.price[i]),
-          name: "Promotion days (price below 90% of usual)", yaxis: "y2", marker: { color: ORANGE, size: 5 } },
+          name: "Promotion days (price below 90% of usual)", yaxis: "y2", marker: { color: RED, size: 8, line: { color: "#fff", width: 1.5 } }, hovertemplate: "€%{y:.2f} (promotion)" },
       ],
       layout: {
+        hovermode: "x unified",
         yaxis: { title: "Units per week", rangemode: "tozero" },
         yaxis2: { title: "Price (EUR)", overlaying: "y", side: "right", showgrid: false },
       },
@@ -67,10 +69,10 @@ export default function ProductView({ id, market }) {
     const pick = (flag) => weeks.filter((w) => w.promo === flag);
     const trace = (flag, name, color) => ({
       type: "scatter", mode: "markers", name, x: pick(flag).map((w) => w.price), y: pick(flag).map((w) => w.units),
-      marker: { color, size: 7, opacity: 0.7 },
+      marker: { color, size: 8, opacity: 0.85, line: { color: "#fff", width: 0.5 } },
     });
     return {
-      data: [trace(false, "Normal weeks", BLUE), trace(true, "Weeks with promotion days", ORANGE)],
+      data: [trace(false, "Normal weeks", NAVY), trace(true, "Weeks with promotion days", RED)],
       layout: { xaxis: { title: "Average price in the week (EUR)" }, yaxis: { title: "Units sold in the week", rangemode: "tozero" } },
     };
   }, [m, weeks]);

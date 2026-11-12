@@ -12,6 +12,7 @@ export default function Plot({ data, layout, height = 320 }) {
       paper_bgcolor: "rgba(0,0,0,0)",
       plot_bgcolor: "rgba(0,0,0,0)",
       legend: { orientation: "h", y: -0.2 },
+      hoverlabel: { namelength: -1, bgcolor: "#ffffff", bordercolor: "#52606d", font: { color: "#1f2933", size: 13 } },
     };
     Plotly.react(ref.current, data, { ...base, ...layout }, { displayModeBar: false, responsive: true });
   }, [data, layout]);
