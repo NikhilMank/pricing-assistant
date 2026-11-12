@@ -60,6 +60,7 @@ No API keys are stored in the repository. Bedrock uses the normal AWS credential
 - **Why not a plain log-log regression?** 36% of daily rows have zero sales, and log(0) does not exist. Poisson handles zeros and keeps the elasticity reading.
 - **Why are web sessions not a control?** A price cut itself brings visitors, so sessions are partly the price effect. Ad spend is used where available (50 live products), as an association, not as ROI.
 - **Why are recommendations small and often "capped"?** The model only knows prices the shop has tested. About 9 in 10 best prices sit on the edge of the tested range, so the label says "capped at the highest/lowest tested price". The median move is about 2%.
+- **Promotion check.** Promotion days bring extra visitors, so for each product the model is fitted a second time without the days priced below 90% of the usual price. The product page says whether the result holds, gets weaker, or cannot be told without those days (informational only: confidence tiers and prices do not change).
 - **Unrestricted optimum.** `cost x b / (1 + b)` is shown only as a small "not recommended" line with a range, because it reacts violently to small changes in b.
 
 ## Limitations

@@ -12,7 +12,7 @@ import numpy as np
 
 from app.data import load_daily
 from app.features import add_features
-from app.model import fit_product, live_products, summarize_product
+from app.model import fit_product, live_products, promo_check, summarize_product
 from app.optimizer import MAX_MOVE, REPLAY_FROM, profit_at, recommend
 
 OUT = Path(__file__).resolve().parent / "artifacts" / "results.json"
@@ -57,6 +57,8 @@ def main() -> None:
             "brand": first["brand"], "tier": summary["tier"], "ad_control": summary["ad_control"],
             "elasticity": {k: round(d[k], 3) for k in ("elasticity", "se", "low", "high")},
             "variant_tiers": {v: summary[v]["tier"] for v in ("D", "C", "G")},
+            "promo_check": {k: (round(v, 3) if isinstance(v, float) else v)
+                            for k, v in promo_check(pdf, summary["tier"]).items()},
         }
         for market, g in pdf.groupby("market"):
             rec = recommend(g, fit, summary["tier"])

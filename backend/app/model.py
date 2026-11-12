@@ -22,6 +22,11 @@ VARIANTS = {
 
 TIER_RANK = {"low": 0, "medium": 1, "high": 2}
 
+# A day counts as a promotion day if its price is below 90% of the usual price of that product-market.
+# The app draws the red dots with the same rule (see PROMO_DISCOUNT in main.py).
+PROMO_DISCOUNT = 0.90
+USUAL_DAYS = 90  # usual price = median of the last 90 days (same as the optimizer)
+
 
 def has_ad_data(product_df: pd.DataFrame) -> bool:
     """9 products have no ad spend at all. They are fitted without the ad term."""
@@ -63,6 +68,39 @@ def summarize_product(product_df: pd.DataFrame) -> dict:
         out[variant] = {"elasticity": e, "se": se, "low": e - Z * se, "high": e + Z * se, "tier": tier}
         tiers.append(tier)
     out["tier"] = min(tiers, key=TIER_RANK.get)  # weakest of the three
+    return out
+
+
+def promo_check(product_df: pd.DataFrame, final_tier: str) -> dict:
+    """Does the result still hold when promotion days are left out?
+
+    Same model (variant D), fitted again on the normal-price days only. The tier rule is applied to the new interval
+    and compared with the product's final tier. Informational only: tiers and prices do not change.
+    verdict: "holds" (same tier or better), "weaker" (one tier lower, still negative), "noisy" (low: the interval
+    reaches 0), None (nothing to say: no promotion days, or already low with all days, or the fit failed).
+    """
+    usual = product_df.groupby("market")["unit_price_eur"].transform(lambda s: s.tail(USUAL_DAYS).median())
+    is_promo = product_df["unit_price_eur"] < PROMO_DISCOUNT * usual
+    out = {"promo_days": int(is_promo.sum()), "total_days": int(len(product_df)),
+           "elasticity": None, "low": None, "high": None, "tier": None, "verdict": None}
+    if out["promo_days"] == 0:
+        return out
+    try:
+        res = fit_product(product_df[~is_promo], "D")
+    except Exception:  # e.g. too few rows left to fit: say nothing rather than guess
+        return out
+    e, se = float(res.params["lp"]), float(res.bse["lp"])
+    if not (se == se and se > 0):  # nan or zero: the fit did not work
+        return out
+    tier = tier_from_interval(e, se)
+    out.update(elasticity=e, low=e - Z * se, high=e + Z * se, tier=tier)
+    if final_tier != "low":
+        if TIER_RANK[tier] >= TIER_RANK[final_tier]:
+            out["verdict"] = "holds"
+        elif tier == "low":
+            out["verdict"] = "noisy"
+        else:
+            out["verdict"] = "weaker"
     return out
 
 
