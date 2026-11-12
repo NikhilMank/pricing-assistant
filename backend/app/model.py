@@ -76,8 +76,9 @@ def promo_check(product_df: pd.DataFrame, final_tier: str) -> dict:
 
     Same model (variant D), fitted again on the normal-price days only. The tier rule is applied to the new interval
     and compared with the product's final tier. Informational only: tiers and prices do not change.
-    verdict: "holds" (same tier or better), "weaker" (one tier lower, still negative), "noisy" (low: the interval
-    reaches 0), None (nothing to say: no promotion days, or already low with all days, or the fit failed).
+    verdict: "holds" (same tier or better), "weaker" (lower tier, but the estimate itself is still negative),
+    "noisy" (lower tier and the estimate is 0 or positive: no clear reaction to price), None (nothing to say:
+    no promotion days, or already low with all days, or the fit failed).
     """
     usual = product_df.groupby("market")["unit_price_eur"].transform(lambda s: s.tail(USUAL_DAYS).median())
     is_promo = product_df["unit_price_eur"] < PROMO_DISCOUNT * usual
@@ -97,10 +98,10 @@ def promo_check(product_df: pd.DataFrame, final_tier: str) -> dict:
     if final_tier != "low":
         if TIER_RANK[tier] >= TIER_RANK[final_tier]:
             out["verdict"] = "holds"
-        elif tier == "low":
-            out["verdict"] = "noisy"
+        elif e >= 0:
+            out["verdict"] = "noisy"   # without promotions the data shows no reaction (or the opposite)
         else:
-            out["verdict"] = "weaker"
+            out["verdict"] = "weaker"  # still negative, only smaller and less certain
     return out
 
 

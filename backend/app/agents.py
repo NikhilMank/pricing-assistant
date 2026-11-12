@@ -20,9 +20,21 @@ MEDIUM_CAP_PCT = 5.0
 
 # ---------------------------------------------------------------- 1. The payload (what the agents see)
 
+# Plain sentences for the promotion check (computed in model.promo_check). Words only, no numbers.
+PROMO_NOTES = {
+    "holds": "Promotion check: even without the weeks with promotions, buyers still react to price in the same way.",
+    "weaker": "Promotion check: without the weeks with promotions, the effect of price looks weaker and less certain, "
+              "so part of the result comes from discounts.",
+    "noisy": "Promotion check: without the weeks with promotions, the data shows no clear reaction to price, "
+             "so the result rests mostly on discounts.",
+    None: "No promotion check applies to this product.",
+}
+
+
 def build_payload(product: dict, series: dict) -> dict:
     """Finished numbers for one product-market. No ad spend, no raw data: only what the agents need."""
     el = product["elasticity"]
+    verdict = (product.get("promo_check") or {}).get("verdict")  # holds | weaker | noisy | None
     tier_rule = {
         "high": "move fully to the model's best price",
         "medium": f"test price: move half the way to the best price, at most {MEDIUM_CAP_PCT:g}% of the usual price",
@@ -43,6 +55,7 @@ def build_payload(product: dict, series: dict) -> dict:
         "profit_change_percent": round(series["profit_change_pct"] * 100, 1),
         "capped_at": ("lowest" if abs(series["best"] - series["low"]) < abs(series["best"] - series["high"]) else "highest")
         if series["at_bound"] else None,
+        "promotion_check": verdict or "none", "promotion_check_note": PROMO_NOTES[verdict],
     }
 
 
@@ -82,7 +95,8 @@ class FakeChat:
                            f"confidence is {p['confidence_tier']}. The usual price is {p['usual_price']} EUR and the "
                            f"model's best allowed price is {p['model_best_price']} EUR.",
                 "confidence_note": f"The tier is {p['confidence_tier']}: {p['tier_rule']}.",
-                "caveat": "Estimates are approximate; promotions may make buyers look more price-sensitive than they are.",
+                "caveat": "Estimates are approximate; promotions may make buyers look more price-sensitive than they are."
+                          + (" " + p["promotion_check_note"] if p["promotion_check"] in ("weaker", "noisy") else ""),
             }
         elif "ROLE: strategist" in system:
             move = p["move_percent"]
@@ -91,7 +105,8 @@ class FakeChat:
             out = {
                 "action": action, "price": p["recommended_price"],
                 "reasoning": f"Move from {p['usual_price']} EUR to {p['recommended_price']} EUR ({move}%); "
-                             f"the model estimates a profit change of {p['profit_change_percent']}%.",
+                             f"the model estimates a profit change of {p['profit_change_percent']}%."
+                             + (" Part of this case rests on promotion weeks." if p["promotion_check"] in ("weaker", "noisy") else ""),
             }
         else:
             verdict = os.environ.get("FAKE_REVIEWER_VERDICT", "approve")
@@ -152,22 +167,29 @@ def ask_json(llm, system: str, user: str, keys: list[str]) -> dict:
 
 COMMON = ("You write for a non-technical business manager at a lamp retailer. Use plain words, short sentences. "
           "The numbers in DATA were calculated by our system. NEVER calculate or invent numbers. "
-          "Quote numbers exactly as they appear in DATA (same rounding). Do not derive new numbers (for example "
+          "Quote numbers exactly as they appear in DATA (same rounding). All prices are in EUR: always write EUR, never francs "
+          "or any other currency. Describe every price change as a move from usual_price to the proposed price, because "
+          "the profit change in DATA is measured from usual_price; mention latest_price only if you say that it is the latest price. Do not derive new numbers (for example "
           "do not state what a 10% price change would do to sales); describe such effects in words only. "
           "Answer with one JSON object and nothing else.")
 
 ANALYST = ("ROLE: analyst\n" + COMMON + "\nExplain what the data says for this product in this market: how price-sensitive "
            "buyers are (elasticity), how sure we are (confidence tier and interval) and what the recommendation is. "
-           'Return {"summary": 2-3 sentences, "confidence_note": 1 sentence, "caveat": 1 sentence about uncertainty}.')
+           "DATA has a promotion_check. If it is 'weaker' or 'noisy', do not describe the confidence as simply high or "
+           "medium: say in the caveat, in plain words, what promotion_check_note says. If it is 'holds', you may say the result "
+           "also holds without the promotion weeks. "
+           'Return {"summary": 2-3 sentences, "confidence_note": 1 sentence, "caveat": 1-2 sentences about uncertainty}.')
 
 STRATEGIST = ("ROLE: strategist\n" + COMMON + "\nPropose the pricing action. You may only choose a price between usual_price and "
               "recommended_price (inclusive): you can be more careful than the recommendation, never bolder. "
-              "If REVIEWER FEEDBACK is given, address it. "
+              "If DATA has promotion_check 'weaker' or 'noisy', say in your reasoning that part of the case rests on "
+              "promotion weeks. If REVIEWER FEEDBACK is given, address it. "
               'Return {"action": "hold" | "raise" | "cut" | "test_price", "price": number from DATA, "reasoning": 2 sentences}.')
 
 REVIEWER = ("ROLE: reviewer\n" + COMMON + "\nYou are the risk reviewer. Check the proposal against DATA: is the price inside the allowed "
             "range and above cost, does it follow the tier rule, is the reasoning honest about uncertainty and free of "
-            "claims not supported by DATA? Verdicts: approve, adjust (fixable, say what to change) or reject (not safe: "
+            "claims not supported by DATA? If promotion_check is 'weaker' or 'noisy' and the reasoning does not mention that part of "
+            "the case rests on promotion weeks, that is a wording problem. Verdicts: approve, adjust (fixable, say what to change) or reject (not safe: "
             "price outside the range, below cost, or a claim that contradicts DATA). Wording problems are 'adjust', not 'reject'. "
             'Return {"verdict": "approve" | "adjust" | "reject", "comment": 1-2 sentences}.')
 

@@ -69,6 +69,10 @@ def number_is_known(x: float, known: set[float]) -> bool:
     return x in ALLOWED_CONSTANTS or any(math.isclose(x, v, abs_tol=0.051) for v in known)
 
 
+def mentions_promotions(texts: list[str]) -> bool:
+    return any("promotion" in text.lower() for text in texts)
+
+
 def check_structure(r: dict) -> bool:
     a, p, rv, f = r["analysis"], r["proposal"], r["review"], r["final"]
     return (all(isinstance(a.get(k), str) and a[k] for k in ("summary", "confidence_note", "caveat"))
@@ -107,6 +111,11 @@ def run_case(case: dict) -> None:
         for t in texts:
             print("      text:", t)
 
+    if p["promotion_check"] in ("weaker", "noisy"):
+        a = r["analysis"]
+        check(mentions_promotions([a["summary"], a["confidence_note"], a["caveat"]]),
+              f"the analyst mentions the promotion check ({p['promotion_check']})")
+
     check(f["price"] >= p["unit_cost"], "final price is not below cost", f"{f['price']} < {p['unit_cost']}")
     check(p["allowed_price_low"] - 0.005 <= f["price"] <= p["allowed_price_high"] + 0.005,
           "final price is inside the allowed range", f"{f['price']}")
@@ -144,6 +153,11 @@ def rule_tests() -> None:
     check(any(not number_is_known(x, known) for x in invented), "the number check catches an invented number (15%)")
     honest = cited_numbers([f"The usual price is {payload['usual_price']} EUR."], payload)
     check(all(number_is_known(x, known) for x in honest), "the number check accepts a number from the data")
+
+    check(not mentions_promotions(["Buyers are price-sensitive and the usual price is 50.95 EUR."]),
+          "the promotion-mention check catches a text that ignores the warning")
+    check(mentions_promotions(["Without the weeks with promotions the effect looks weaker."]),
+          "the promotion-mention check accepts a text that mentions it")
 
     saved = (os.environ.get("LLM_PROVIDER"), os.environ.get("FAKE_REVIEWER_VERDICT"))
     os.environ["LLM_PROVIDER"] = "fake"
