@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+frontend/dist/
+.env
+.env.*
+# Claude Code settings can contain tokens: never commit them
+.claude/
+*.docx
+
+# Markdown notes stay local; only the README is published
+*.md
+!README.md
