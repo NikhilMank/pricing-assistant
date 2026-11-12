@@ -1,5 +1,7 @@
 # Pricing Assistant
 
+**Live demo:** https://d2oyuycmo2qef6.cloudfront.net (the first AI analysis after a pause can take a few extra seconds)
+
 A small project that turns daily sales data into price recommendations. It shows two years of daily sales (60 products in 3 markets: DE, FR, CH), estimates how sensitive buyers are to price, recommends a profit-maximising price inside a safe range, and lets three AI agents explain and check each recommendation. A small evaluation script tests the agents' output.
 
 ## How it works
@@ -69,7 +71,7 @@ No API keys are stored in the repository. Bedrock uses the normal AWS credential
 
 ## Deployment
 
-Runs on AWS: the frontend as static files in S3 behind CloudFront, the backend as a Lambda function with a Function URL, and Bedrock called through the function's IAM role (no keys anywhere). Set `CORS_ORIGINS` to the CloudFront address and build the frontend with `VITE_API_BASE` set to the Function URL.
+Runs on AWS (eu-central-1): the frontend as static files in S3 behind CloudFront, the backend as a Lambda function with a Function URL, and Bedrock (Claude Haiku 4.5) called through the function's IAM role (no keys anywhere). `backend/build_lambda.py` builds the Lambda zip without Docker. Set `CORS_ORIGINS` to the CloudFront address and build the frontend with `VITE_API_BASE` set to the Function URL.
 
 ## Repository layout
 
