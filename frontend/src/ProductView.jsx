@@ -4,8 +4,8 @@ import AgentCards from "./AgentCards.jsx";
 import Plot from "./Plot.jsx";
 import { TIER_ACTION, TIER_LABEL, boundNote, eur, pct } from "./format.js";
 
-const BLUE = "#2f6db5", ORANGE = "#d9822b", GREY = "#7b8794", GREEN = "#2e8b57";
-const NAVY = "#14213d", BARS = "#c3c9d1", RED = "#d62828";
+const BLUE = "#1f58a6", ORANGE = "#d9822b", GREY = "#4b5563", GREEN = "#1f6f43";
+const NAVY = "#14213d", BARS = "#b4bcc6", RED = "#d62828";
 
 // Daily rows are mostly 0 to 3 units, so the charts use weekly totals (7 days each).
 function weekly(h) {
@@ -21,6 +21,43 @@ function weekly(h) {
     weeks.push({ date: h.date[i], units, price: priceSum / (end - i), promo });
   }
   return weeks;
+}
+
+// Plain facts about the weekly points, so each product shows its own price range (no conclusion drawn for the reader)
+function weekFacts(weeks) {
+  const normal = weeks.filter((w) => !w.promo).map((w) => w.price);
+  const promo = weeks.filter((w) => w.promo).map((w) => w.price);
+  if (normal.length === 0) return "";
+  const lo = Math.min(...normal), hi = Math.max(...normal);
+  const spread = ((hi - lo) / lo) * 100;
+  const normalText = `Normal weeks: prices from ${eur(lo)} to ${eur(hi)} (${spread.toFixed(0)}% apart).`;
+  const promoText = promo.length ? ` Promotion weeks: ${promo.length}, down to ${eur(Math.min(...promo))}.` : " No promotion weeks.";
+  return normalText + promoText;
+}
+
+// The promotion check (computed in precompute.py): does the result still hold without the promotion days?
+const PROMO_MESSAGE = {
+  holds: ["ok", "Good sign.", "Even if we ignore the weeks with promotions, customers still buy less when the price goes up. The result does not rest on discounts alone."],
+  weaker: ["warn", "Be careful.", "Without the promotion weeks, the effect of price looks weaker. Part of the result comes from discounts, which also bring extra visitors."],
+  noisy: ["warn", "Be careful.", "Outside the promotion weeks, the data cannot tell how customers react to price. The result rests mostly on the discount periods."],
+};
+
+function PromoCheck({ check, all }) {
+  const message = check && PROMO_MESSAGE[check.verdict];
+  if (!message) return null;
+  const [kind, lead, text] = message;
+  return (
+    <div className={`promo-check ${kind}`}>
+      <b>Does the result depend on promotions?</b>
+      <p><strong>{lead}</strong> {text}</p>
+      <p className="muted small">
+        Price effect for this product (all markets): {all.elasticity.toFixed(2)} using all days (likely between{" "}
+        {all.low.toFixed(2)} and {all.high.toFixed(2)}), {check.elasticity.toFixed(2)} without the promotion days
+        (likely between {check.low.toFixed(2)} and {check.high.toFixed(2)}). Promotion days: {check.promo_days} of{" "}
+        {check.total_days}.
+      </p>
+    </div>
+  );
 }
 
 function unrestrictedText(u) {
@@ -54,7 +91,9 @@ export default function ProductView({ id, market }) {
         { type: "scatter", mode: "lines", x: m.history.date, y: m.history.price, name: "Price", yaxis: "y2",
           line: { color: NAVY, width: 2.5, shape: "hv" }, hovertemplate: "€%{y:.2f}" },
         { type: "scatter", mode: "markers", x: promoDays.map((i) => m.history.date[i]), y: promoDays.map((i) => m.history.price[i]),
-          name: "Promotion days (price below 90% of usual)", yaxis: "y2", marker: { color: RED, size: 8, line: { color: "#fff", width: 1.5 } }, hovertemplate: "€%{y:.2f} (promotion)" },
+          name: "Promotion days (price below 90% of usual)", yaxis: "y2", marker: { color: RED, size: 7 }, hovertemplate: "€%{y:.2f} (promotion)" },
+        { type: "scatter", mode: "lines", x: [m.history.date[0], m.history.date[m.history.date.length - 1]], y: [m.usual, m.usual],
+          name: `Usual price (${eur(m.usual)})`, yaxis: "y2", line: { color: GREY, width: 2, dash: "dot" }, hovertemplate: "€%{y:.2f}" },
       ],
       layout: {
         hovermode: "x unified",
@@ -73,7 +112,14 @@ export default function ProductView({ id, market }) {
     });
     return {
       data: [trace(false, "Normal weeks", NAVY), trace(true, "Weeks with promotion days", RED)],
-      layout: { xaxis: { title: "Average price in the week (EUR)" }, yaxis: { title: "Units sold in the week", rangemode: "tozero" } },
+      layout: {
+        xaxis: { title: "Average price in the week (EUR)" },
+        yaxis: { title: "Units sold in the week", range: [0, Math.max(...weeks.map((w) => w.units), 1) * 1.15] },
+        shapes: [{ type: "line", x0: m.usual, x1: m.usual, yref: "paper", y0: 0, y1: 1, line: { color: GREY, width: 2, dash: "dot" } }],
+        // label sits above the plot, to the right of the line, so the line never runs through the text
+        annotations: [{ x: m.usual, yref: "paper", y: 1, yanchor: "bottom", xanchor: "left", xshift: 6, text: `usual ${eur(m.usual)}`, showarrow: false, font: { color: "#3e4c59" } }],
+        margin: { l: 55, r: 55, t: 40, b: 45 },
+      },
     };
   }, [m, weeks]);
 
@@ -93,7 +139,7 @@ export default function ProductView({ id, market }) {
         yaxis: { title: "Model profit, Oct to Dec 2025 days (EUR)" },
         shapes: [line(m.usual, GREY), line(m.final, GREEN)],
         annotations: [
-          { x: m.usual, yref: "paper", y: 1.02, text: "usual", showarrow: false, font: { color: "#52606d" } },
+          { x: m.usual, yref: "paper", y: 1.02, text: "usual", showarrow: false, font: { color: "#3e4c59" } },
           { x: m.final, yref: "paper", y: 1.1, text: "recommended", showarrow: false, font: { color: GREEN } },
         ],
         margin: { l: 70, r: 30, t: 50, b: 45 },
@@ -125,9 +171,10 @@ export default function ProductView({ id, market }) {
           {m.bound && <small>{boundNote(m)}</small>}
         </div>
         <div className="tile">
-          <span>Confidence</span>
+          <span>Model confidence</span>
           <b className={`badge big ${m.tier}`}>{TIER_LABEL[m.tier]}</b>
           <small>{TIER_ACTION[m.tier]}</small>
+          <small>Based on all days, including promotions.</small>
         </div>
         <div className="tile">
           <span>Price sensitivity (elasticity, approximate)</span>
@@ -153,8 +200,9 @@ export default function ProductView({ id, market }) {
       </section>
       <section className="card">
         <h2>Price versus sales</h2>
-        <p className="muted">Each dot is one week. Promotions bring extra visitors, so orange weeks can look better than the price alone explains.</p>
+        <p className="muted">Each dot is one week. Promotions bring extra visitors, so red weeks can look better than the price alone explains. {weekFacts(weeks)}</p>
         <Plot data={scatter.data} layout={scatter.layout} height={320} />
+        <PromoCheck check={product.promo_check} all={e} />
       </section>
       <section className="card">
         <h2>Profit at different prices</h2>
