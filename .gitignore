@@ -12,3 +12,4 @@ frontend/dist/
 # Markdown notes stay local; only the README is published
 *.md
 !README.md
+build/
