@@ -38,8 +38,8 @@ function weekFacts(weeks) {
 // The promotion check (computed in precompute.py): does the result still hold without the promotion days?
 const PROMO_MESSAGE = {
   holds: ["ok", "Good sign.", "Even if we ignore the weeks with promotions, customers still buy less when the price goes up. The result does not rest on discounts alone."],
-  weaker: ["warn", "Be careful.", "Without the promotion weeks, the effect of price looks weaker. Part of the result comes from discounts, which also bring extra visitors."],
-  noisy: ["warn", "Be careful.", "Outside the promotion weeks, the data cannot tell how customers react to price. The result rests mostly on the discount periods."],
+  weaker: ["warn", "Be careful.", "Without the promotion weeks, the effect of price looks weaker and less certain. Part of the result comes from discounts, which also bring extra visitors."],
+  noisy: ["warn", "Be careful.", "Outside the promotion weeks, the data shows no clear reaction to price. The result rests mostly on the discount periods."],
 };
 
 function PromoCheck({ check, all }) {
@@ -139,8 +139,8 @@ export default function ProductView({ id, market }) {
         yaxis: { title: "Model profit, Oct to Dec 2025 days (EUR)" },
         shapes: [line(m.usual, GREY), line(m.final, GREEN)],
         annotations: [
-          { x: m.usual, yref: "paper", y: 1.02, text: "usual", showarrow: false, font: { color: "#3e4c59" } },
-          { x: m.final, yref: "paper", y: 1.1, text: "recommended", showarrow: false, font: { color: GREEN } },
+          { x: m.usual, yref: "paper", y: 1.02, yanchor: "bottom", xanchor: "left", xshift: 6, text: "usual", showarrow: false, font: { color: "#3e4c59" } },
+          { x: m.final, yref: "paper", y: 1.02, yanchor: "bottom", xanchor: "right", xshift: -6, text: "recommended", showarrow: false, font: { color: GREEN } },
         ],
         margin: { l: 70, r: 30, t: 50, b: 45 },
       },
