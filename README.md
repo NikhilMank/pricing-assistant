@@ -1,6 +1,11 @@
 # Pricing Assistant
 
-**Live demo:** https://d2oyuycmo2qef6.cloudfront.net (the first AI analysis after a pause can take a few extra seconds)
+**Live demo:**
+
+- Google Cloud Run (Gemini on Vertex AI): https://pricing-assistant-817090878834.europe-west3.run.app
+- AWS (Lambda + CloudFront, Claude Haiku 4.5 on Bedrock): https://d2oyuycmo2qef6.cloudfront.net
+
+Both serve the same app and data. The first AI analysis after a pause can take a few extra seconds.
 
 A small project that turns daily sales data into price recommendations. It shows two years of daily sales (60 products in 3 markets: DE, FR, CH), estimates how sensitive buyers are to price, recommends a profit-maximising price inside a safe range, and lets three AI agents explain and check each recommendation. A small evaluation script tests the agents' output.
 
@@ -84,9 +89,13 @@ gcloud run deploy pricing-assistant --source . --region europe-west3 --allow-una
 
 The service runs as the Cloud Run service account with the Vertex AI User role, so no keys are needed.
 
+The same setup as Terraform (APIs, image build, service account, public service) is in `terraform/gcp/`.
+
 ## Deployment on AWS
 
 The AWS deployment (Lambda + CloudFront) is a second working deployment. It runs in eu-central-1: the frontend as static files in S3 behind CloudFront, the backend as a Lambda function with a Function URL, and Bedrock (Claude Haiku 4.5) called through the function's IAM role (no keys anywhere). `backend/build_lambda.py` builds the Lambda zip without Docker. Set `CORS_ORIGINS` to the CloudFront address and build the frontend with `VITE_API_BASE` set to the Function URL.
+
+The whole AWS setup can also be recreated with Terraform (`terraform/aws/`): build the zip, `terraform apply`, then build and upload the frontend with the printed API address.
 
 ## Repository layout
 
@@ -94,4 +103,5 @@ The AWS deployment (Lambda + CloudFront) is a second working deployment. It runs
 backend/    API, model, optimizer, agents, evals, precompute script, results.json
 frontend/   React + Vite + Plotly app
 data/       daily sales CSV
+terraform/  aws/ and gcp/: infrastructure as code for both deployments
 ```
