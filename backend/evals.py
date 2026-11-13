@@ -178,7 +178,7 @@ def rule_tests() -> None:
 
 
 def main() -> int:
-    mode = "LIVE (Bedrock)" if "--live" in sys.argv else "offline (fake model)"
+    mode = f"LIVE ({os.environ['LLM_PROVIDER']})" if "--live" in sys.argv else "offline (fake model)"
     print(f"Agent evaluation: {mode}")
     for case in CASES:
         run_case(case)

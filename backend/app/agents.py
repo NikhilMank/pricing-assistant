@@ -129,7 +129,8 @@ def get_chat_model():
             vertexai=True,
             project=os.environ.get("GOOGLE_CLOUD_PROJECT"),
             location=os.environ.get("VERTEX_LOCATION", "global"),
-            temperature=0, max_output_tokens=1000,
+            # Gemini 4 "thinks" before answering and the thinking counts as output: keep it low and leave room for the JSON
+            temperature=0, max_output_tokens=3000, reasoning_effort=os.environ.get("VERTEX_REASONING", "low"),
         )
     if provider == "bedrock":
         from langchain_aws import ChatBedrockConverse  # imported here so startup stays fast
