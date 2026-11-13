@@ -1,0 +1,10 @@
+.git
+.github
+.claude
+.venv
+build
+**/node_modules
+frontend/dist
+**/__pycache__
+*.md
+*.docx

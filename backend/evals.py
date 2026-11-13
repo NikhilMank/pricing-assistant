@@ -11,7 +11,7 @@ Plus a few tests of the safety rules and the revision loop with deliberately bad
 
 Run from the backend folder:
   ../.venv/bin/python -W ignore evals.py          offline, with the fake model (free, instant)
-  ../.venv/bin/python -W ignore evals.py --live   with the real model on Bedrock (about 20 s per case)
+  ../.venv/bin/python -W ignore evals.py --live   with the real model (Bedrock, or LLM_PROVIDER=vertex for Gemini)
 Exit code is 1 if any check fails.
 """
 import math
@@ -22,7 +22,8 @@ import sys
 if "--live" not in sys.argv:
     os.environ["LLM_PROVIDER"] = "fake"
 else:
-    os.environ["LLM_PROVIDER"] = "bedrock"
+    # real model: Bedrock unless LLM_PROVIDER=vertex is set (Gemini on Google Cloud)
+    os.environ["LLM_PROVIDER"] = "vertex" if os.environ.get("LLM_PROVIDER") == "vertex" else "bedrock"
 
 from app import agents  # noqa: E402  (after the environment is set)
 from app.store import find_series, results  # noqa: E402

@@ -117,10 +117,20 @@ class FakeChat:
 
 
 def get_chat_model():
-    """One place that decides which model is used. LLM_PROVIDER=bedrock (default) or fake."""
+    """One place that decides which model is used. LLM_PROVIDER=bedrock (default), vertex (Gemini on Google Cloud) or fake."""
     provider = os.environ.get("LLM_PROVIDER", "bedrock")
     if provider == "fake":
         return FakeChat()
+    if provider == "vertex":
+        from langchain_google_genai import ChatGoogleGenerativeAI  # imported here so startup stays fast
+        # No API key: on Cloud Run the service's own Google identity is used (locally: gcloud auth application-default login)
+        return ChatGoogleGenerativeAI(
+            model=os.environ.get("VERTEX_MODEL", "gemini-4-hydrogen"),
+            vertexai=True,
+            project=os.environ.get("GOOGLE_CLOUD_PROJECT"),
+            location=os.environ.get("VERTEX_LOCATION", "global"),
+            temperature=0, max_output_tokens=1000,
+        )
     if provider == "bedrock":
         from langchain_aws import ChatBedrockConverse  # imported here so startup stays fast
         return ChatBedrockConverse(
@@ -138,7 +148,9 @@ def invoke_with_retry(llm, messages, waits=(3, 8, 15)):
         try:
             return llm.invoke(messages)
         except Exception as e:
-            if "Throttling" not in type(e).__name__ and "Too many requests" not in str(e):
+            busy = ("Throttling" in type(e).__name__ or "Too many requests" in str(e)
+                    or "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e))  # Bedrock / Gemini rate limits
+            if not busy:
                 raise
             time.sleep(wait)
     return llm.invoke(messages)  # last try: let any error through
