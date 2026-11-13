@@ -46,14 +46,18 @@ Evaluation: `cd backend && ../.venv/bin/python -W ignore evals.py` (offline) or 
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `LLM_PROVIDER` | `bedrock` | `bedrock` or `fake` (offline, for tests) |
+| `LLM_PROVIDER` | `bedrock` | `bedrock`, `vertex` (Gemini on Google Cloud) or `fake` (offline, for tests) |
 | `BEDROCK_MODEL_ID` | `eu.anthropic.claude-haiku-4-5-20251001-v1:0` | model used by the agents |
 | `BEDROCK_REGION` | `eu-central-1` | AWS region for Bedrock |
+| `VERTEX_MODEL` | `gemini-4-hydrogen` | Gemini model used when `LLM_PROVIDER=vertex` |
+| `VERTEX_LOCATION` | `global` | Google Cloud location for Vertex AI |
+| `VERTEX_REASONING` | `low` | reasoning effort of the Gemini model (its thinking counts as output tokens) |
+| `GOOGLE_CLOUD_PROJECT` | none | Google Cloud project used for Vertex AI |
 | `CORS_ORIGINS` | `http://localhost:5173` | websites allowed to call the API (comma separated) |
 | `MAX_ANALYSES` | `300` | cost guard: AI analyses per server process |
 | `VITE_API_BASE` | empty | frontend build setting: address of the API when it is not on the same site |
 
-No API keys are stored in the repository. Bedrock uses the normal AWS credential chain (an IAM role when deployed).
+No API keys are stored in the repository. Bedrock uses the normal AWS credential chain (an IAM role when deployed). Vertex AI uses the Google identity of the environment (the Cloud Run service account when deployed, `gcloud auth application-default login` locally).
 
 ## Design choices worth knowing
 
@@ -70,9 +74,19 @@ No API keys are stored in the repository. Bedrock uses the normal AWS credential
 - The ad-spend coefficient is an association, not return on investment.
 - The agent cache is lost when a container restarts. An A/B test is the proper next step before changing prices.
 
-## Deployment
+## Deployment on Google Cloud Run
 
-Runs on AWS (eu-central-1): the frontend as static files in S3 behind CloudFront, the backend as a Lambda function with a Function URL, and Bedrock (Claude Haiku 4.5) called through the function's IAM role (no keys anywhere). `backend/build_lambda.py` builds the Lambda zip without Docker. Set `CORS_ORIGINS` to the CloudFront address and build the frontend with `VITE_API_BASE` set to the Function URL.
+The `Dockerfile` in the repository root builds the frontend and the backend into one container (same origin, so no CORS setup). Deploy from the repository root with:
+
+```bash
+gcloud run deploy pricing-assistant --source . --region europe-west3 --allow-unauthenticated --memory 1Gi --max-instances 2 --timeout 300 --set-env-vars LLM_PROVIDER=vertex,GOOGLE_CLOUD_PROJECT=<project>,VERTEX_MODEL=gemini-4-hydrogen,VERTEX_LOCATION=global,MAX_ANALYSES=300
+```
+
+The service runs as the Cloud Run service account with the Vertex AI User role, so no keys are needed.
+
+## Deployment on AWS
+
+The AWS deployment (Lambda + CloudFront) is a second working deployment. It runs in eu-central-1: the frontend as static files in S3 behind CloudFront, the backend as a Lambda function with a Function URL, and Bedrock (Claude Haiku 4.5) called through the function's IAM role (no keys anywhere). `backend/build_lambda.py` builds the Lambda zip without Docker. Set `CORS_ORIGINS` to the CloudFront address and build the frontend with `VITE_API_BASE` set to the Function URL.
 
 ## Repository layout
 
