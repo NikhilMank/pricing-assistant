@@ -13,3 +13,10 @@ frontend/dist/
 *.md
 !README.md
 build/
+
+# Terraform: state can hold secrets, provider downloads are large
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+crash.log
