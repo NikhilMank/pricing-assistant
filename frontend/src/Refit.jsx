@@ -143,6 +143,114 @@ function Summary({ rows, total, products, stopped }) {
   );
 }
 
+// The custom result of one product: tiles, table with the official numbers next to it, and the charts.
+// Used for "Recalculate this product" and for a click on a row of "Recalculate all products".
+// data = POST /api/refit/{id}?curves=true, official = GET /api/product/{id} (sales history and official curve).
+function ProductResult({ data, options, official, officialError, startMarket, extra }) {
+  const [chartMarket, setChartMarket] = useState(startMarket);
+  const officialMarket = official?.markets[chartMarket];
+  const customMarket = data.markets.find((m) => m.market === chartMarket);
+  const weeks = useMemo(() => (officialMarket ? weekly(officialMarket.history) : []), [officialMarket]);
+  const compareChart = useMemo(
+    () => (officialMarket && customMarket ? compareCurveSpec(officialMarket, customMarket.custom) : null),
+    [officialMarket, customMarket]);
+  const timeChart = useMemo(() => (officialMarket ? timeChartSpec(officialMarket, weeks) : null), [officialMarket, weeks]);
+  const scatterChart = useMemo(() => (officialMarket ? scatterSpec(officialMarket, weeks) : null), [officialMarket, weeks]);
+
+  return (
+    <>
+    <section className="card">
+      <h2>Custom recalculation results: {data.name}</h2>
+      <p className="muted">{data.product_id} · {optionsText(options)}.</p>
+      {extra?.(chartMarket)}
+      <div className="tiles">
+        <div className="tile">
+          <span>How strongly sales react to price (approximate)</span>
+          <b>{data.custom.elasticity.toFixed(2)}</b>
+          <small>Likely between {data.custom.low.toFixed(2)} and {data.custom.high.toFixed(2)}.</small>
+          <small>Official: {data.official.elasticity.elasticity.toFixed(2)}</small>
+        </div>
+        <div className="tile">
+          <span>Confidence</span>
+          <b className={`badge big ${data.custom.tier}`}>{TIER_LABEL[data.custom.tier]}</b>
+          <small>Official, everything taken into account: {TIER_LABEL[data.official.main_model_tier]}</small>
+          <small>Official, homepage: {TIER_LABEL[data.official.tier]}</small>
+        </div>
+      </div>
+      <p className="muted small">
+        {CONFIDENCE_NOTE}
+        {data.days_removed > 0 && ` ${data.days_removed} promotion days were left out of the calculation.`}
+        {data.ad_spend_ignored && " This product has no ad-spend data, so the ad setting had no effect."}
+      </p>
+      <div className="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Market</th><th className="num">Latest price</th><th className="num">Usual price</th>
+              <th className="num">Allowed range</th><th className="num">Recommended</th>
+              <th className="num">Change</th><th className="num">Expected profit change (estimate)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.markets.map((m) => (
+              <tr key={m.market} className="plain">
+                <td><b>{m.market}</b></td>
+                <td className="num">{eur(m.latest_price)}</td>
+                <td className="num">{eur(m.custom.usual)}</td>
+                <td className="num">{eur(m.custom.low)} to {eur(m.custom.high)}
+                  <div className="muted">Official {eur(m.official.low)} to {eur(m.official.high)}</div></td>
+                <td className="num"><Pair custom={m.custom.final} official={m.official.final} format={eur}
+                  differs={Math.abs(m.custom.final - m.official.final) >= 0.005} />
+                  <div className="muted">{m.custom.note || boundNote(m.custom)}</div></td>
+                <td className="num"><Pair custom={m.custom.move_pct} official={m.official.move_pct} format={pct}
+                  differs={Math.abs(m.custom.move_pct - m.official.move_pct) >= 0.0005} /></td>
+                <td className="num"><Pair custom={m.custom.profit_change_pct} official={m.official.profit_change_pct} format={pct}
+                  differs={Math.abs(m.custom.profit_change_pct - m.official.profit_change_pct) >= 0.0005} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <div className="chart-head">
+      <h2>Charts</h2>
+      <div className="tabs">
+        {data.markets.map((m) => (
+          <button key={m.market} className={m.market === chartMarket ? "tab active" : "tab"}
+            onClick={() => setChartMarket(m.market)}>{m.market}</button>
+        ))}
+      </div>
+    </div>
+    {officialError && <p className="muted">{officialError}</p>}
+    {!officialError && !official && <p className="muted">Loading the sales history…</p>}
+    {compareChart && (
+      <>
+        <section className="card">
+          <h2>Profit at different prices</h2>
+          <p className="muted">
+            What we expect the profit to be if only the price were different. Blue is the official curve,
+            violet the custom one. The dashed parts are outside the prices the shop has tested.
+          </p>
+          <Plot data={compareChart.data} layout={compareChart.layout} height={360} />
+          {customMarket.custom.unrestricted && (
+            <p className="muted small">Custom: {plainOptimumText(customMarket.custom.unrestricted)}</p>
+          )}
+        </section>
+        <section className="card">
+          <h2>Price and sales over time</h2>
+          <Plot data={timeChart.data} layout={timeChart.layout} height={340} />
+        </section>
+        <section className="card">
+          <h2>Price versus sales</h2>
+          <p className="muted">Each dot is one week. Promotions bring extra visitors, so red weeks can look better than the price alone explains. {weekFacts(weeks)}</p>
+          <Plot data={scatterChart.data} layout={scatterChart.layout} height={320} />
+        </section>
+      </>
+    )}
+    </>
+  );
+}
+
 export default function Refit({ id, market }) {
   const [options, setOptions] = useState(DEFAULTS);
   const [one, setOne] = useState(null);          // result of "Recalculate this product"
@@ -151,7 +259,6 @@ export default function Refit({ id, market }) {
   const [oneError, setOneError] = useState("");
   const [productData, setProductData] = useState(null);  // sales history and official curve (same data as the product page)
   const [productError, setProductError] = useState("");
-  const [chartMarket, setChartMarket] = useState(market);
 
   const [rows, setRows] = useState([]);          // result rows of "Recalculate all", filled one product at a time
   const [runOptions, setRunOptions] = useState(DEFAULTS);
@@ -165,6 +272,12 @@ export default function Refit({ id, market }) {
   const [skipped, setSkipped] = useState([]);
   const abortRef = useRef(null);
 
+  // A click on a row of the list shows that product's custom result and charts (with the settings of the run)
+  const [detail, setDetail] = useState(null);   // { id, market, loading } | { id, market, error } | { id, market, data, official, officialError }
+  const detailToken = useRef(0);                 // an older request must not overwrite a newer click
+  const officialCache = useRef(new Map());       // product id -> promise of GET /api/product/{id}
+  const detailRef = useRef(null);
+
   const [sort, setSort] = useState({ key: "default", dir: 1 });
   const [marketFilter, setMarketFilter] = useState("all");
   const [tierFilter, setTierFilter] = useState("all");
@@ -172,6 +285,10 @@ export default function Refit({ id, market }) {
 
   // Leaving the page stops a running "Recalculate all"
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  useEffect(() => {
+    if (detail?.data) detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [detail?.data]);
 
   // The charts need the sales history and the official curve; they do not depend on the settings, so load them once
   useEffect(() => {
@@ -187,6 +304,34 @@ export default function Refit({ id, market }) {
   function clearAll() {
     setRows([]); setSkipped([]); setAllError(""); setStopped(false); setDone(0); setTotal(0); setCurrent("");
     setStarted(false);
+    detailToken.current++; setDetail(null);
+  }
+
+  function loadOfficial(pid) {
+    if (!officialCache.current.has(pid)) {
+      const promise = getProduct(pid);
+      promise.catch(() => officialCache.current.delete(pid));   // a failed load is tried again on the next click
+      officialCache.current.set(pid, promise);
+    }
+    return officialCache.current.get(pid);
+  }
+
+  async function openDetail(r) {
+    if (running) return;
+    const token = ++detailToken.current;
+    setDetail({ id: r.product_id, market: r.market, loading: true });
+    let result;
+    try {
+      const [data, official] = await Promise.all([
+        runRefit(r.product_id, runOptions, undefined, true),
+        loadOfficial(r.product_id).catch(() => null),
+      ]);
+      result = { id: r.product_id, market: r.market, data, official,
+        officialError: official ? "" : "The sales history could not be loaded, so the charts are not shown." };
+    } catch (e) {
+      result = { id: r.product_id, market: r.market, error: plainError(e) };
+    }
+    if (token === detailToken.current) setDetail(result);
   }
 
   async function refitOne() {
@@ -270,16 +415,6 @@ export default function Refit({ id, market }) {
     return list;
   }, [rows, marketFilter, tierFilter, search, sort]);
 
-  // Charts of the single-product result
-  const officialMarket = productData?.markets[chartMarket];
-  const customMarket = one?.markets.find((m) => m.market === chartMarket);
-  const weeks = useMemo(() => (officialMarket ? weekly(officialMarket.history) : []), [officialMarket]);
-  const compareChart = useMemo(
-    () => (officialMarket && customMarket ? compareCurveSpec(officialMarket, customMarket.custom) : null),
-    [officialMarket, customMarket]);
-  const timeChart = useMemo(() => (officialMarket ? timeChartSpec(officialMarket, weeks) : null), [officialMarket, weeks]);
-  const scatterChart = useMemo(() => (officialMarket ? scatterSpec(officialMarket, weeks) : null), [officialMarket, weeks]);
-
   const clickSort = (key) => setSort((s) => (s.key === key ? { key, dir: -s.dir } : { key, dir: 1 }));
   const finished = started && !running && rows.length > 0;
   const productsDone = new Set(rows.map((r) => r.product_id)).size;
@@ -328,98 +463,8 @@ export default function Refit({ id, market }) {
       {oneError && <p className="error">{oneError}</p>}
 
       {one && (
-        <section className="card">
-          <h2>Custom recalculation results: {one.name}</h2>
-          <p className="muted">{one.product_id} · {optionsText(oneOptions)}.</p>
-          <div className="tiles">
-            <div className="tile">
-              <span>How strongly sales react to price (approximate)</span>
-              <b>{one.custom.elasticity.toFixed(2)}</b>
-              <small>Likely between {one.custom.low.toFixed(2)} and {one.custom.high.toFixed(2)}.</small>
-              <small>Official: {one.official.elasticity.elasticity.toFixed(2)}</small>
-            </div>
-            <div className="tile">
-              <span>Confidence</span>
-              <b className={`badge big ${one.custom.tier}`}>{TIER_LABEL[one.custom.tier]}</b>
-              <small>Official, everything taken into account: {TIER_LABEL[one.official.main_model_tier]}</small>
-              <small>Official, homepage: {TIER_LABEL[one.official.tier]}</small>
-            </div>
-          </div>
-          <p className="muted small">
-            {CONFIDENCE_NOTE}
-            {one.days_removed > 0 && ` ${one.days_removed} promotion days were left out of the calculation.`}
-            {one.ad_spend_ignored && " This product has no ad-spend data, so the ad setting had no effect."}
-          </p>
-          <div className="tablewrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Market</th><th className="num">Latest price</th><th className="num">Usual price</th>
-                  <th className="num">Allowed range</th><th className="num">Recommended</th>
-                  <th className="num">Change</th><th className="num">Expected profit change (estimate)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {one.markets.map((m) => (
-                  <tr key={m.market} className="plain">
-                    <td><b>{m.market}</b></td>
-                    <td className="num">{eur(m.latest_price)}</td>
-                    <td className="num">{eur(m.custom.usual)}</td>
-                    <td className="num">{eur(m.custom.low)} to {eur(m.custom.high)}
-                      <div className="muted">Official {eur(m.official.low)} to {eur(m.official.high)}</div></td>
-                    <td className="num"><Pair custom={m.custom.final} official={m.official.final} format={eur}
-                      differs={Math.abs(m.custom.final - m.official.final) >= 0.005} />
-                      <div className="muted">{m.custom.note || boundNote(m.custom)}</div></td>
-                    <td className="num"><Pair custom={m.custom.move_pct} official={m.official.move_pct} format={pct}
-                      differs={Math.abs(m.custom.move_pct - m.official.move_pct) >= 0.0005} /></td>
-                    <td className="num"><Pair custom={m.custom.profit_change_pct} official={m.official.profit_change_pct} format={pct}
-                      differs={Math.abs(m.custom.profit_change_pct - m.official.profit_change_pct) >= 0.0005} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
-
-      {one && (
-        <>
-          <div className="chart-head">
-            <h2>Charts</h2>
-            <div className="tabs">
-              {one.markets.map((m) => (
-                <button key={m.market} className={m.market === chartMarket ? "tab active" : "tab"}
-                  onClick={() => setChartMarket(m.market)}>{m.market}</button>
-              ))}
-            </div>
-          </div>
-          {productError && <p className="muted">{productError}</p>}
-          {!productError && !productData && <p className="muted">Loading the sales history…</p>}
-          {compareChart && (
-            <>
-              <section className="card">
-                <h2>Profit at different prices</h2>
-                <p className="muted">
-                  What we expect the profit to be if only the price were different. Blue is the official curve,
-                  violet the custom one. The dashed parts are outside the prices the shop has tested.
-                </p>
-                <Plot data={compareChart.data} layout={compareChart.layout} height={360} />
-                {customMarket.custom.unrestricted && (
-                  <p className="muted small">Custom: {plainOptimumText(customMarket.custom.unrestricted)}</p>
-                )}
-              </section>
-              <section className="card">
-                <h2>Price and sales over time</h2>
-                <Plot data={timeChart.data} layout={timeChart.layout} height={340} />
-              </section>
-              <section className="card">
-                <h2>Price versus sales</h2>
-                <p className="muted">Each dot is one week. Promotions bring extra visitors, so red weeks can look better than the price alone explains. {weekFacts(weeks)}</p>
-                <Plot data={scatterChart.data} layout={scatterChart.layout} height={320} />
-              </section>
-            </>
-          )}
-        </>
+        <ProductResult key={one.product_id} data={one} options={oneOptions} official={productData} officialError={productError}
+          startMarket={market} />
       )}
 
       {started && (
@@ -444,6 +489,23 @@ export default function Refit({ id, market }) {
             </p>
           )}
           {finished && <Summary rows={rows} total={total} products={productsDone} stopped={stopped || Boolean(allError)} />}
+
+          {detail && (
+            <div ref={detailRef} className="detail-panel">
+              {detail.loading && <p className="muted">Loading {detail.id}…</p>}
+              {detail.error && <p className="error">{detail.error}</p>}
+              {detail.data && (
+                <ProductResult key={`${detail.id}-${detail.market}`} data={detail.data} options={runOptions} official={detail.official}
+                  officialError={detail.officialError} startMarket={detail.market}
+                  extra={(m) => (
+                    <p className="detail-actions">
+                      <a href={`#/product/${detail.id}/${m}`} target="_blank" rel="noopener">Open the official product page</a>
+                    </p>
+                  )} />
+              )}
+              <button className="link" onClick={() => { detailToken.current++; setDetail(null); }}>Close</button>
+            </div>
+          )}
 
           {rows.length > 0 && (
             <>
@@ -472,7 +534,9 @@ export default function Refit({ id, market }) {
                   </thead>
                   <tbody>
                     {shown.map((r) => (
-                      <tr key={r.key} onClick={() => window.open(`#/product/${r.product_id}/${r.market}`, "_blank", "noopener")}>
+                      <tr key={r.key} className={running ? "waiting" : detail?.id === r.product_id && detail?.market === r.market ? "picked" : ""}
+                        tabIndex={running ? undefined : 0} aria-label={`Show the custom result for ${r.name} in ${r.market}`}
+                        onClick={() => openDetail(r)} onKeyDown={(e) => e.key === "Enter" && openDetail(r)}>
                         <td><b>{r.name}</b><div className="muted">{r.product_id} · {r.category}</div></td>
                         <td>{r.market}</td>
                         <td className="num">{eur(r.latest_price)}</td>
@@ -499,7 +563,7 @@ export default function Refit({ id, market }) {
               </div>
               <p className="muted small">
                 {CONFIDENCE_NOTE}
-                A click on a row opens the product page in a new tab.
+                A click on a row shows its custom result and charts.
               </p>
             </>
           )}
