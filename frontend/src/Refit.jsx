@@ -81,6 +81,9 @@ function plainError(e) {
   return "Could not reach the server. Check the connection and try again.";
 }
 
+// Text of one entry in the product picker, for example "Pendant Light 'Malia' (SKU-1000)"
+const label = (p) => `${p.name} (${p.id})`;
+
 // One table row per product-market, with the custom numbers and the official ones next to them
 function rowsFrom(d) {
   return d.markets.map((m) => ({
@@ -251,8 +254,12 @@ function ProductResult({ data, options, official, officialError, startMarket, ex
   );
 }
 
+// id and market are optional: an address like #/refit/SKU-1000/DE starts with that product picked, #/refit with none
 export default function Refit({ id, market }) {
   const [options, setOptions] = useState(DEFAULTS);
+  const [pickedId, setPickedId] = useState(id);        // the product "Recalculate this product" works on
+  const [products, setProducts] = useState([]);        // [{ id, name }] for the picker
+  const [pickText, setPickText] = useState("");
   const [one, setOne] = useState(null);          // result of "Recalculate this product"
   const [oneOptions, setOneOptions] = useState(DEFAULTS);
   const [oneBusy, setOneBusy] = useState(false);
@@ -286,18 +293,48 @@ export default function Refit({ id, market }) {
   // Leaving the page stops a running "Recalculate all"
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  // A click on a row far down the list jumps straight to the panel above it (at once, before the charts load:
+  // the panel only grows downwards, so its top stays in view)
+  const panelKey = detail ? `${detail.id}-${detail.market}` : "";
   useEffect(() => {
-    if (detail?.data) detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [detail?.data]);
+    if (panelKey) detailRef.current?.scrollIntoView({ behavior: "auto", block: "start" });
+  }, [panelKey]);
+
+  // Closing the panel takes the reader back to the row that was clicked
+  function closeDetail() {
+    const row = document.querySelector("tr.picked");
+    detailToken.current++; setDetail(null);
+    requestAnimationFrame(() => row?.scrollIntoView({ behavior: "auto", block: "center" }));
+  }
 
   // The charts need the sales history and the official curve; they do not depend on the settings, so load them once
   useEffect(() => {
     setProductData(null);
     setProductError("");
-    getProduct(id).then(setProductData).catch(() => setProductError("The sales history could not be loaded, so the charts are not shown."));
+    if (!pickedId) return;
+    getProduct(pickedId).then(setProductData).catch(() => setProductError("The sales history could not be loaded, so the charts are not shown."));
+  }, [pickedId]);
+
+  // The product list for the picker (one entry per product, by name)
+  useEffect(() => {
+    getOverview().then((rows) => {
+      const seen = new Map(rows.map((r) => [r.product_id, r.name]));
+      const list = [...seen].map(([pid, name]) => ({ id: pid, name })).sort((a, b) => a.name.localeCompare(b.name));
+      setProducts(list);
+      const first = list.find((p) => p.id === id);
+      if (first) setPickText(label(first));
+    }).catch(() => {});   // without the list "Recalculate all products" still works
   }, [id]);
 
   const set = (key, value) => setOptions((o) => ({ ...o, [key]: value }));
+
+  // Typing or choosing in the picker: the product is picked when the text is exactly one of the entries
+  function pick(text) {
+    setPickText(text);
+    const found = products.find((p) => label(p) === text);
+    const next = found ? found.id : null;
+    if (next !== pickedId) { setPickedId(next); setOne(null); setOneError(""); }
+  }
   const busy = oneBusy || running;
 
   // Only one result is on screen at a time: starting a recalculation removes the other result
@@ -341,7 +378,7 @@ export default function Refit({ id, market }) {
     setOneError("");
     const used = { ...options };
     try {
-      const d = await runRefit(id, used, undefined, true);
+      const d = await runRefit(pickedId, used, undefined, true);
       setOne(d);
       setOneOptions(used);
     } catch (e) {
@@ -421,7 +458,8 @@ export default function Refit({ id, market }) {
 
   return (
     <main>
-      <a href={`#/product/${id}/${market}`} className="back">← Back to {id} {market}</a>
+      {id ? <a href={`#/product/${id}/${market}`} className="back">← Back to {id} {market}</a>
+        : <a href="#/" className="back">← All products</a>}
       <h1>Custom recalculation</h1>
       <p className="lead">
         Change what the price calculation takes into account and see what it would recommend. The results below are for
@@ -452,8 +490,17 @@ export default function Refit({ id, market }) {
         </div>
         <p className="muted small">The price is always taken into account: how sales react to the price is what is measured.</p>
         <p className="muted small">Your choice: {optionsText(options)}.</p>
+        <div className="picker">
+          <label htmlFor="product-pick"><b>Product</b> <span className="muted">(for "Recalculate this product")</span></label>
+          <input id="product-pick" list="product-list" value={pickText} disabled={busy} placeholder="Type a name or choose from the list"
+            onChange={(e) => pick(e.target.value)} />
+          <datalist id="product-list">
+            {products.map((p) => <option key={p.id} value={label(p)} />)}
+          </datalist>
+        </div>
         <div className="actions">
-          <button className="primary" onClick={refitOne} disabled={busy}>{oneBusy ? "Recalculating…" : "Recalculate this product"}</button>
+          <button className="primary" onClick={refitOne} disabled={busy || !pickedId}
+            title={pickedId ? "" : "Choose a product first"}>{oneBusy ? "Recalculating…" : "Recalculate this product"}</button>
           <button className="primary" onClick={refitAll} disabled={busy}>Recalculate all products</button>
           {running && <button className="secondary" onClick={cancel}>Cancel</button>}
           <button className="link" onClick={() => setOptions(DEFAULTS)} disabled={busy}>Back to official settings</button>
@@ -464,7 +511,7 @@ export default function Refit({ id, market }) {
 
       {one && (
         <ProductResult key={one.product_id} data={one} options={oneOptions} official={productData} officialError={productError}
-          startMarket={market} />
+          startMarket={market && one.markets.some((m) => m.market === market) ? market : one.markets[0].market} />
       )}
 
       {started && (
@@ -503,7 +550,7 @@ export default function Refit({ id, market }) {
                     </p>
                   )} />
               )}
-              <button className="link" onClick={() => { detailToken.current++; setDetail(null); }}>Close</button>
+              <button className="link close" onClick={closeDetail}>Close</button>
             </div>
           )}
 

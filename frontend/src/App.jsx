@@ -4,10 +4,11 @@ import ProductView from "./ProductView.jsx";
 import Refit from "./Refit.jsx";
 
 // The address bar decides what is shown: "#/product/SKU-1000/DE" is a product page, "#/refit/SKU-1000/DE" the
-// custom recalculation page, anything else the overview.
+// custom recalculation page ("#/refit" alone opens it without a product), anything else the overview.
 function readHash() {
   const m = window.location.hash.match(/^#\/(product|refit)\/([^/]+)\/([A-Z]{2})/);
-  return m ? { page: m[1], id: m[2], market: m[3] } : null;
+  if (m) return { page: m[1], id: m[2], market: m[3] };
+  return /^#\/refit\/?$/.test(window.location.hash) ? { page: "refit", id: null, market: null } : null;
 }
 
 export default function App() {

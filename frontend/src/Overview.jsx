@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { getOverview } from "./api.js";
+import { getHealth, getOverview } from "./api.js";
 import { TIER_ACTION, TIER_LABEL, TIER_RANK, boundNote, eur, pct } from "./format.js";
 
 const COLUMNS = [
@@ -23,9 +23,11 @@ export default function Overview() {
   const [market, setMarket] = useState("all");
   const [tier, setTier] = useState("all");
   const [search, setSearch] = useState("");
+  const [refitOn, setRefitOn] = useState(false); // the "Custom recalculation" button only shows where the server can do it
 
   useEffect(() => {
     getOverview().then(setRows).catch((e) => setError(e.message));
+    getHealth().then((h) => setRefitOn(Boolean(h.refit))).catch(() => setRefitOn(false));
   }, []);
 
   const shown = useMemo(() => {
@@ -58,7 +60,10 @@ export default function Overview() {
 
   return (
     <main>
-      <h1>Which prices should change?</h1>
+      <div className="page-head">
+        <h1>Which prices should change?</h1>
+        {refitOn && <a className="refit-link" href="#/refit" target="_blank" rel="noopener">Custom recalculation</a>}
+      </div>
       <p className="lead">
         {rows.length} product-markets. Recommendations are limited to prices the shop has really tested, so moves are
         small. Click a row for the details and the AI analysis.

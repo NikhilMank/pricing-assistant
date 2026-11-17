@@ -66,7 +66,7 @@ button.primary:disabled { opacity: 0.6; cursor: wait; }
 .foot { margin-top: 30px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 14px; }
 
 /* ---- Custom refit: a separate page with its own violet look, so nobody mistakes it for the official results ---- */
-.refit-link { display: inline-block; margin: 14px 0 0 16px; font-size: 14px; font-weight: 600; color: #5b3fb5; text-decoration: none; border: 1px solid #5b3fb5; border-radius: 8px; padding: 3px 12px; background: #f3efff; }
+.refit-link { display: inline-block; margin: 0; font-size: 14px; font-weight: 600; color: #5b3fb5; text-decoration: none; border: 1px solid #5b3fb5; border-radius: 8px; padding: 3px 12px; background: #f3efff; }
 .refit-link:hover { background: #e7e0fb; }
 .custom-bar { height: 8px; background: #5b3fb5; }
 body:has(.page.custom) { background: #f1eefb; }
@@ -115,11 +115,17 @@ button.secondary { background: var(--card); color: var(--blue); border: 1px soli
 .chart-head .tabs { margin: 0; }
 .custom button.tab { cursor: pointer; font-size: inherit; font-family: inherit; }
 
+.page-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.picker { display: flex; flex-direction: column; gap: 4px; margin: 14px 0 6px; max-width: 460px; }
+.picker input { padding: 8px 10px; font-size: 14.5px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+
 /* click on a row of the all-products list: its custom result opens above the list */
 .custom tbody tr.picked td { background: #e3dcf7; }
 .custom tbody tr.waiting { cursor: default; }
 .custom tbody tr.waiting:hover { background: transparent; }
-.detail-panel { margin: 16px 0 22px; padding: 4px 16px 12px; border: 2px solid #5b3fb5; border-radius: 12px; background: #faf8ff; }
+.detail-panel { scroll-margin-top: 12px; margin: 16px 0 22px; padding: 4px 16px 12px; border: 2px solid #5b3fb5; border-radius: 12px; background: #faf8ff; }
+.custom button.close { color: #b42318; font-weight: 600; border: 1px solid #b42318; border-radius: 8px; padding: 4px 14px; background: #fff; }
+.custom button.close:hover { background: #fdecea; }
 .detail-actions { margin: 4px 0 10px; font-size: 14px; }
 .detail-actions a { color: #5b3fb5; font-weight: 600; }
 

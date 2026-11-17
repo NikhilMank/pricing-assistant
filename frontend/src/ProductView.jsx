@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { getHealth, getProduct } from "./api.js";
+import { getProduct } from "./api.js";
 import AgentCards from "./AgentCards.jsx";
 import Plot from "./Plot.jsx";
 import { curveSpec, scatterSpec, timeChartSpec, unrestrictedText, weekFacts, weekly } from "./charts.js";
@@ -33,17 +33,12 @@ function PromoCheck({ check, all }) {
 export default function ProductView({ id, market }) {
   const [product, setProduct] = useState(null);
   const [error, setError] = useState("");
-  const [refitOn, setRefitOn] = useState(false); // the "Custom recalculation" link only shows where the server can do it
 
   useEffect(() => {
     setProduct(null);
     setError("");
     getProduct(id).then(setProduct).catch((e) => setError(e.message));
   }, [id]);
-
-  useEffect(() => {
-    getHealth().then((h) => setRefitOn(Boolean(h.refit))).catch(() => setRefitOn(false));
-  }, []);
 
   const m = product?.markets[market];
   const weeks = useMemo(() => (m ? weekly(m.history) : []), [m]);
@@ -59,9 +54,6 @@ export default function ProductView({ id, market }) {
   return (
     <main>
       <a href="#/" className="back">← All products</a>
-      {refitOn && (
-        <a className="refit-link" href={`#/refit/${id}/${market}`} target="_blank" rel="noopener">Custom recalculation</a>
-      )}
       <h1>{product.name}</h1>
       <p className="muted">{product.product_id} · {product.category} · {product.brand}</p>
 
