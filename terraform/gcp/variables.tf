@@ -20,3 +20,9 @@ variable "image_tag" {
   type        = string
   default     = "v1"
 }
+
+variable "github_repo" {
+  description = "GitHub repository (owner/name) whose workflow may deploy to Cloud Run"
+  type        = string
+  default     = "NikhilMank/pricing-assistant"
+}

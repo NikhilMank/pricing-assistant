@@ -7,7 +7,9 @@
 #   terraform init
 #   terraform apply -var project_id=<your-project-id>
 # `apply` builds the image with Cloud Build (needs the gcloud CLI, logged in) and starts the service.
-# After code changes, run apply again with a new tag: -var image_tag=v2
+# After the first apply, code changes are deployed by the GitHub workflow (.github/workflows/deploy-cloudrun.yml),
+# which signs in through the identity pool at the bottom of this file. Cloud Run keeps the image CI deployed, so a
+# later `apply` does not roll it back (see ignore_changes on the service).
 
 terraform {
   required_version = ">= 1.5"
@@ -32,6 +34,9 @@ resource "google_project_service" "apis" {
     "cloudbuild.googleapis.com",
     "artifactregistry.googleapis.com",
     "aiplatform.googleapis.com", # Vertex AI (Gemini)
+    "iam.googleapis.com",        # identity pool for GitHub Actions
+    "iamcredentials.googleapis.com",
+    "sts.googleapis.com",
   ])
   service            = each.key
   disable_on_destroy = false
@@ -119,6 +124,11 @@ resource "google_cloud_run_v2_service" "app" {
     }
   }
 
+  # The GitHub workflow deploys new images (and Cloud Run records who did it). Terraform must not undo that.
+  lifecycle {
+    ignore_changes = [template[0].containers[0].image, client, client_version]
+  }
+
   depends_on = [terraform_data.build_image, google_project_iam_member.vertex]
 }
 
@@ -128,4 +138,63 @@ resource "google_cloud_run_v2_service_iam_member" "public" {
   location = google_cloud_run_v2_service.app.location
   role     = "roles/run.invoker"
   member   = "allUsers"
+}
+
+# ---- Deploys from GitHub Actions, without any key ----
+# GitHub proves who it is with a short-lived token; Google exchanges it for the deploy identity below.
+# Only workflows of this repository, on the main branch, are accepted.
+# (A deleted pool or provider keeps its name for 30 days, so destroy + apply right away needs new ids.)
+resource "google_iam_workload_identity_pool" "github" {
+  workload_identity_pool_id = "github"
+  display_name              = "GitHub Actions"
+  depends_on                = [google_project_service.apis]
+}
+
+resource "google_iam_workload_identity_pool_provider" "github" {
+  workload_identity_pool_id          = google_iam_workload_identity_pool.github.workload_identity_pool_id
+  workload_identity_pool_provider_id = "github"
+  display_name                       = "GitHub repository"
+
+  attribute_mapping = {
+    "google.subject"       = "assertion.sub"
+    "attribute.repository" = "assertion.repository"
+  }
+  attribute_condition = "assertion.repository == \"${var.github_repo}\" && assertion.ref == \"refs/heads/main\""
+
+  oidc {
+    issuer_uri = "https://token.actions.githubusercontent.com"
+  }
+}
+
+# The identity the workflow acts as. It may push images and update the one service, nothing else.
+resource "google_service_account" "deploy" {
+  account_id   = "pricing-assistant-deploy"
+  display_name = "Pricing assistant (GitHub deploy)"
+}
+
+resource "google_service_account_iam_member" "github_may_use_deploy" {
+  service_account_id = google_service_account.deploy.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.github_repo}"
+}
+
+resource "google_artifact_registry_repository_iam_member" "deploy_push" {
+  repository = google_artifact_registry_repository.images.name
+  location   = google_artifact_registry_repository.images.location
+  role       = "roles/artifactregistry.writer"
+  member     = "serviceAccount:${google_service_account.deploy.email}"
+}
+
+resource "google_cloud_run_v2_service_iam_member" "deploy_update" {
+  name     = google_cloud_run_v2_service.app.name
+  location = google_cloud_run_v2_service.app.location
+  role     = "roles/run.developer"
+  member   = "serviceAccount:${google_service_account.deploy.email}"
+}
+
+# Cloud Run only lets an identity start a revision that runs as the container's service account if it may "act as" it
+resource "google_service_account_iam_member" "deploy_acts_as_run" {
+  service_account_id = google_service_account.run.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.deploy.email}"
 }
