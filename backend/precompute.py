@@ -1,6 +1,6 @@
 """Run the model and optimizer once and save everything the API needs to a JSON file.
 
-Why: fitting all products takes about a minute. The API (and the Lambda) must not do that per request,
+Why: fitting all products takes about a minute. The API must not do that per request,
 so we do it here, at build time, and the API just reads the file.
 
 Run from the backend folder:  ../.venv/bin/python -W ignore precompute.py
@@ -8,38 +8,12 @@ Run from the backend folder:  ../.venv/bin/python -W ignore precompute.py
 import json
 from pathlib import Path
 
-import numpy as np
-
 from app.data import load_daily
 from app.features import add_features
 from app.model import fit_product, live_products, promo_check, summarize_product
-from app.optimizer import MAX_MOVE, REPLAY_FROM, profit_at, recommend
+from app.optimizer import profit_curve, recommend, unrestricted_optimum
 
 OUT = Path(__file__).resolve().parent / "artifacts" / "results.json"
-CURVE_POINTS = 41
-
-
-def profit_curve(g, fit, rec: dict) -> list[dict]:
-    """Model profit at prices around the usual price. Points outside the allowed range are marked, because
-    the model has no data there (the app draws them greyed: 'indication only')."""
-    replay = g[(g["date"] >= REPLAY_FROM) & (g["bf"] == 0)]
-    low = max(rec["usual"] * (1 - MAX_MOVE), rec["cost"] * 1.01)
-    high = rec["usual"] * (1 + MAX_MOVE)
-    curve = []
-    for price in np.linspace(low, high, CURVE_POINTS):
-        in_range = bool(rec["low"] - 1e-9 <= price <= rec["high"] + 1e-9)
-        curve.append({"price": round(float(price), 2),
-                      "profit": round(profit_at(fit, replay, float(price), rec["cost"]), 2),
-                      "in_range": in_range})
-    return curve
-
-
-def unrestricted_optimum(cost: float, b: float, b_low: float, b_high: float) -> dict:
-    """Profit-maximising price without any limits: cost x b / (1 + b), only exists if b < -1.
-    Very sensitive to b, so we also give the range from the two ends of the confidence interval."""
-    def opt(x):
-        return round(cost * x / (1 + x), 2) if x < -1 else None
-    return {"point": opt(b), "from": opt(b_low), "to": opt(b_high)}  # None = no finite optimum
 
 
 def main() -> None:

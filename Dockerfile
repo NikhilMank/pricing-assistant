@@ -12,8 +12,9 @@ RUN npm run build
 FROM python:3.12-slim
 WORKDIR /app
 COPY backend/requirements.txt backend/requirements.txt
-# statsmodels is only needed to fit the model (precompute.py), not to serve results.json
-RUN grep -vE "^(statsmodels|mangum)" backend/requirements.txt > /tmp/requirements.txt \
+# statsmodels stays in: the "Custom recalculation" page fits the model on request (adds about 200 MB with scipy).
+# Only mangum (the AWS Lambda adapter) is left out.
+RUN grep -vE "^mangum" backend/requirements.txt > /tmp/requirements.txt \
     && pip install --no-cache-dir -r /tmp/requirements.txt
 COPY backend/ backend/
 COPY data/ data/

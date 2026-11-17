@@ -20,11 +20,17 @@ def usual_price(series_df: pd.DataFrame) -> float:
     return float(series_df["unit_price_eur"].tail(USUAL_DAYS).median())
 
 
-def allowed_range(series_df: pd.DataFrame) -> dict:
-    """The lowest and highest price the optimizer may recommend for one product-market."""
+def allowed_range(series_df: pd.DataFrame, min_run: int = MIN_RUN) -> dict:
+    """The lowest and highest price the optimizer may recommend for one product-market.
+
+    min_run = how many days in a row a price must have been held to count as tested (14 officially;
+    the custom refit page may try 7 or 28). If no price was held that long, low and high are None.
+    """
     usual = usual_price(series_df)
     cost = float(series_df["unit_cost_eur"].iloc[0])  # cost is constant per product
-    tested = series_df.loc[series_df["run_days"] >= MIN_RUN, "unit_price_eur"]
+    tested = series_df.loc[series_df["run_days"] >= min_run, "unit_price_eur"]
+    if tested.empty:
+        return {"usual": usual, "cost": cost, "tested_min": None, "tested_max": None, "low": None, "high": None}
 
     low = max(tested.min(), usual * (1 - MAX_MOVE), cost)
     high = min(tested.max(), usual * (1 + MAX_MOVE))
@@ -64,10 +70,23 @@ def profit_at(fit, replay_rows: pd.DataFrame, price: float, cost: float) -> floa
     return (price - cost) * predicted_units(fit, replay_rows, price)
 
 
-def recommend(series_df: pd.DataFrame, fit, tier: str) -> dict:
+def hold_usual_price(rng: dict, tier: str, min_run: int) -> dict:
+    """No usable range (only possible with a min_run other than 14): keep the usual price and say why."""
+    usual = rng["usual"]
+    if rng["low"] is None:
+        note = f"No price was held for {min_run} days, so the price stays at the usual price."
+    else:
+        note = f"The prices held for {min_run} days do not include the usual price, so the price stays at the usual price."
+    return {**rng, "low": usual, "high": usual, "tier": tier, "best": usual, "final": round(usual, 2),
+            "move_pct": 0.0, "profit_change_pct": 0.0, "at_bound": False, "note": note}
+
+
+def recommend(series_df: pd.DataFrame, fit, tier: str, min_run: int = MIN_RUN) -> dict:
     """Best price and the recommended price for one product-market."""
-    rng = allowed_range(series_df)
+    rng = allowed_range(series_df, min_run)
     usual, cost = rng["usual"], rng["cost"]
+    if rng["low"] is None or not (rng["low"] - 1e-9 <= usual <= rng["high"] + 1e-9):
+        return hold_usual_price(rng, tier, min_run)  # never happens with the official 14 days
 
     # Replay recent days without Black Friday (an unusual period) with only the price changed
     replay = series_df[(series_df["date"] >= REPLAY_FROM) & (series_df["bf"] == 0)]
@@ -96,6 +115,32 @@ def recommend(series_df: pd.DataFrame, fit, tier: str) -> dict:
         "profit_change_pct": final_profit / base_profit - 1,
         "at_bound": bool(np.isclose(best, rng["low"]) or np.isclose(best, rng["high"])),
     }
+
+
+CURVE_POINTS = 41  # prices on the profit curve shown in the app
+
+
+def profit_curve(g: pd.DataFrame, fit, rec: dict) -> list[dict]:
+    """Model profit at prices around the usual price. Points outside the allowed range are marked, because
+    the model has no data there (the app draws them greyed: 'indication only')."""
+    replay = g[(g["date"] >= REPLAY_FROM) & (g["bf"] == 0)]
+    low = max(rec["usual"] * (1 - MAX_MOVE), rec["cost"] * 1.01)
+    high = rec["usual"] * (1 + MAX_MOVE)
+    curve = []
+    for price in np.linspace(low, high, CURVE_POINTS):
+        in_range = bool(rec["low"] - 1e-9 <= price <= rec["high"] + 1e-9)
+        curve.append({"price": round(float(price), 2),
+                      "profit": round(profit_at(fit, replay, float(price), rec["cost"]), 2),
+                      "in_range": in_range})
+    return curve
+
+
+def unrestricted_optimum(cost: float, b: float, b_low: float, b_high: float) -> dict:
+    """Profit-maximising price without any limits: cost x b / (1 + b), only exists if b < -1.
+    Very sensitive to b, so we also give the range from the two ends of the confidence interval."""
+    def opt(x):
+        return round(cost * x / (1 + x), 2) if x < -1 else None
+    return {"point": opt(b), "from": opt(b_low), "to": opt(b_high)}  # None = no finite optimum
 
 
 def recommend_all(df: pd.DataFrame) -> pd.DataFrame:

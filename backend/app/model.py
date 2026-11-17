@@ -33,18 +33,53 @@ def has_ad_data(product_df: pd.DataFrame) -> bool:
     return bool(product_df["ad"].notna().all())
 
 
-def build_formula(variant: str, with_ad: bool) -> str:
-    terms = list(VARIANTS[variant])
+def formula_from_terms(terms: list[str], with_ad: bool) -> str:
+    """The model sentence from a list of terms (the ad term is added last)."""
+    terms = list(terms)
     if with_ad:
         terms.append("ad")
     return "units_sold ~ " + " + ".join(terms)
 
 
+def build_formula(variant: str, with_ad: bool) -> str:
+    return formula_from_terms(VARIANTS[variant], with_ad)
+
+
+def fit_glm(formula: str, data: pd.DataFrame):
+    """One Poisson fit with robust (HC1) standard errors. Every fit in the app goes through here."""
+    model = smf.glm(formula, data=data, family=sm.families.Poisson())
+    return model.fit(cov_type="HC1")  # HC1 = robust standard errors
+
+
 def fit_product(product_df: pd.DataFrame, variant: str = "D"):
     """Fit one Poisson model for one product (all its markets together)."""
-    formula = build_formula(variant, has_ad_data(product_df))
-    model = smf.glm(formula, data=product_df, family=sm.families.Poisson())
-    return model.fit(cov_type="HC1")  # HC1 = robust standard errors
+    return fit_glm(build_formula(variant, has_ad_data(product_df)), product_df)
+
+
+def promo_mask(product_df: pd.DataFrame) -> pd.Series:
+    """True on promotion days: the price is below 90% of the usual price of that product-market.
+    Used by the promotion check and by the custom refit, so both mean exactly the same thing."""
+    usual = product_df.groupby("market")["unit_price_eur"].transform(lambda s: s.tail(USUAL_DAYS).median())
+    return product_df["unit_price_eur"] < PROMO_DISCOUNT * usual
+
+
+def fit_custom(product_df: pd.DataFrame, include_year: bool = True, include_black_friday_flag: bool = True,
+               include_ad_spend: bool = True, exclude_promotion_days: bool = False,
+               include_market: bool = True, include_weekday: bool = True, include_month: bool = True):
+    """Custom refit of one product (all its markets): the full model D with the chosen parts switched off.
+
+    Only the price always stays in (its coefficient is the elasticity). With all defaults this is exactly
+    fit_product(df, "D"). Returns (fit, info): info says how many days were left out and whether the ad option
+    had to be ignored.
+    """
+    data = product_df[~promo_mask(product_df)] if exclude_promotion_days else product_df
+    switched_on = {"C(market)": include_market, "bf": include_black_friday_flag, "C(dow)": include_weekday,
+                   "C(month)": include_month, "C(year)": include_year}
+    terms = [t for t in D_TERMS if switched_on.get(t, True)]  # "lp" is not in the dict, so it always stays
+    has_ad = has_ad_data(data)
+    fit = fit_glm(formula_from_terms(terms, include_ad_spend and has_ad), data)
+    info = {"days_removed": int(len(product_df) - len(data)), "ad_ignored": bool(include_ad_spend and not has_ad)}
+    return fit, info
 
 
 def tier_from_interval(elasticity: float, se: float) -> str:
@@ -80,8 +115,7 @@ def promo_check(product_df: pd.DataFrame, final_tier: str) -> dict:
     "noisy" (lower tier and the estimate is 0 or positive: no clear reaction to price), None (nothing to say:
     no promotion days, or already low with all days, or the fit failed).
     """
-    usual = product_df.groupby("market")["unit_price_eur"].transform(lambda s: s.tail(USUAL_DAYS).median())
-    is_promo = product_df["unit_price_eur"] < PROMO_DISCOUNT * usual
+    is_promo = promo_mask(product_df)
     out = {"promo_days": int(is_promo.sum()), "total_days": int(len(product_df)),
            "elasticity": None, "low": None, "high": None, "tier": None, "verdict": None}
     if out["promo_days"] == 0:

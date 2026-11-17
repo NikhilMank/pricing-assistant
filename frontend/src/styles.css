@@ -65,4 +65,54 @@ button.primary:disabled { opacity: 0.6; cursor: wait; }
 .promo-check.warn { background: #fdf5e6; border-color: var(--amber); }
 .foot { margin-top: 30px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 14px; }
 
+/* ---- Custom refit: a separate page with its own violet look, so nobody mistakes it for the official results ---- */
+.refit-link { display: inline-block; margin: 14px 0 0 16px; font-size: 14px; font-weight: 600; color: #5b3fb5; text-decoration: none; border: 1px solid #5b3fb5; border-radius: 8px; padding: 3px 12px; background: #f3efff; }
+.refit-link:hover { background: #e7e0fb; }
+.custom-bar { height: 8px; background: #5b3fb5; }
+body:has(.page.custom) { background: #f1eefb; }
+.custom { --blue: #5b3fb5; --line: #cdc5e6; --muted: #4a4560; }
+.custom .top { border-bottom: 2px solid #5b3fb5; }
+.custom-tag { margin-left: auto; background: #5b3fb5; color: #fff; font-size: 13px; font-weight: 700; padding: 3px 12px; border-radius: 999px; }
+.custom th { background: #e9e3fa; }
+.custom td.num { white-space: nowrap; }
+.custom tbody tr:hover { background: #ece7fb; }
+.custom tbody tr.plain { cursor: default; }
+.custom tbody tr.plain:hover { background: transparent; }
+.custom .setting-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px 32px; margin: 10px 0; }
+.custom .setting-group { display: flex; flex-direction: column; gap: 12px; }
+.custom .setting-group h3 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.custom .switch-row { display: flex; align-items: flex-start; gap: 12px; font-size: 14.5px; cursor: pointer; }
+.custom .switch-row > span { display: flex; flex-direction: column; gap: 1px; }
+.custom input.switch { appearance: none; -webkit-appearance: none; flex: none; width: 40px; height: 22px; margin: 1px 0 0; border-radius: 999px;
+  background: #c4bde0; position: relative; cursor: pointer; transition: background 0.15s; }
+.custom input.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform 0.15s; }
+.custom input.switch:checked { background: var(--blue); }
+.custom input.switch:checked::after { transform: translateX(18px); }
+.custom input.switch:focus-visible { outline: 3px solid #a99bdc; outline-offset: 2px; }
+.custom input.switch:disabled { opacity: 0.5; cursor: not-allowed; }
+.custom .choice { display: flex; flex-direction: column; gap: 6px; font-size: 14.5px; }
+.custom .segmented { display: inline-flex; align-self: flex-start; }
+.custom .segmented label { display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer; }
+.custom .segmented label > span { padding: 7px 18px; border: 1px solid var(--blue); background: var(--card); color: var(--blue); font-weight: 600; margin-left: -1px; }
+.custom .segmented label:first-child > span { border-radius: 8px 0 0 8px; margin-left: 0; }
+.custom .segmented label:last-child > span { border-radius: 0 8px 8px 0; }
+.custom .segmented label.selected > span { background: var(--blue); color: #fff; }
+.custom .segmented input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.custom .segmented input:focus-visible + span { outline: 3px solid #a99bdc; outline-offset: 2px; }
+.custom .segmented input:disabled + span { opacity: 0.5; cursor: not-allowed; }
+.custom .official-mark { font-size: 12px; color: var(--muted); }
+.actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+.actions button.primary { margin-top: 0; }
+button.secondary { background: var(--card); color: var(--blue); border: 1px solid var(--blue); border-radius: 8px; padding: 8px 16px; font-size: 14px; font-weight: 600; cursor: pointer; }
+.custom button:disabled { opacity: 0.55; cursor: not-allowed; }
+.progress { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.bar { height: 10px; background: #ddd6f3; border-radius: 999px; overflow: hidden; }
+.bar > div { height: 100%; background: #5b3fb5; transition: width 0.2s; }
+.changed { font-weight: 700; color: #5b3fb5; }
+.custom-summary p { margin: 6px 0; }
+.chart-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-top: 22px; }
+.chart-head h2 { margin: 0; }
+.chart-head .tabs { margin: 0; }
+.custom button.tab { cursor: pointer; font-size: inherit; font-family: inherit; }
+
 @media (max-width: 600px) { h1 { font-size: 22px; } .tile b { font-size: 20px; } }
