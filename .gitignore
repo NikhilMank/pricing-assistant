@@ -14,6 +14,16 @@ frontend/dist/
 !README.md
 build/
 
+# The retired AWS setup stays on this machine only (not published)
+terraform/aws/
+.github/workflows/deploy-backend.yml
+.github/workflows/deploy-frontend.yml
+backend/build_lambda.py
+backend/lambda_handler.py
+
+# The retired AWS setup is kept on this machine only (not published)
+terraform/aws/
+
 # Terraform: state can hold secrets, provider downloads are large
 .terraform/
 *.tfstate

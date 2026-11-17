@@ -117,8 +117,8 @@ class FakeChat:
 
 
 def get_chat_model():
-    """One place that decides which model is used. LLM_PROVIDER=bedrock (default), vertex (Gemini on Google Cloud) or fake."""
-    provider = os.environ.get("LLM_PROVIDER", "bedrock")
+    """One place that decides which model is used. LLM_PROVIDER=vertex (default, Gemini on Google Cloud), bedrock (Claude on AWS) or fake."""
+    provider = os.environ.get("LLM_PROVIDER", "vertex")
     if provider == "fake":
         return FakeChat()
     if provider == "vertex":
@@ -286,7 +286,7 @@ MAX_RUNS_PER_PROCESS = int(os.environ.get("MAX_ANALYSES", "300"))  # cost guard
 def analyze(product_id: str, market: str) -> dict:
     """Run the three agents for one product-market. Results are cached (lost when the container restarts)."""
     global _llm_runs
-    provider = os.environ.get("LLM_PROVIDER", "bedrock")
+    provider = os.environ.get("LLM_PROVIDER", "vertex")
     key = (product_id, market, provider)
     if key in _cache:
         return {**_cache[key], "cached": True}

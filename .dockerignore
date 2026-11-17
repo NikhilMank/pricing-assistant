@@ -8,3 +8,7 @@ frontend/dist
 **/__pycache__
 *.md
 *.docx
+# retired AWS files kept locally only
+backend/build_lambda.py
+backend/lambda_handler.py
+terraform
