@@ -115,8 +115,11 @@ export function compareCurveSpec(official, custom) {
   const line = (x, color) => ({ type: "line", x0: x, x1: x, yref: "paper", y0: 0, y1: 1, line: { color, width: 2, dash: "dot" } });
   // the lower of the two recommended prices gets its label on the left of its line, the higher one on the right
   const customRight = custom.final >= official.final;
-  const label = (x, text, color, right, y) => ({
-    x, yref: "paper", y, yanchor: "bottom", xanchor: right ? "left" : "right", xshift: right ? 6 : -6, text, showarrow: false, font: { color },
+  // yshift is in pixels above the plot: the usual price label sits on the lower row, both recommendation labels on the
+  // upper row. They are on opposite sides of their lines, so they cannot touch each other however close the prices are.
+  const label = (x, text, color, right, yshift) => ({
+    x, yref: "paper", y: 1, yshift, yanchor: "bottom", xanchor: right ? "left" : "right", xshift: right ? 6 : -6,
+    text, showarrow: false, font: { color, size: 12 },
   });
   return {
     data: [
@@ -134,12 +137,12 @@ export function compareCurveSpec(official, custom) {
       yaxis: { title: "Expected profit, Oct to Dec 2025 days (EUR)" },
       shapes: [line(official.usual, GREY), line(official.final, GREEN), line(custom.final, VIOLET)],
       annotations: [
-        label(official.usual, "usual", "#3e4c59", true, 1.02),
-        label(official.final, "official", GREEN, !customRight, 1.1),
-        label(custom.final, "custom", VIOLET, customRight, 1.1),
+        label(official.usual, `usual price ${eur(official.usual)}`, "#3e4c59", true, 4),
+        label(official.final, `official recommendation ${eur(official.final)}`, GREEN, !customRight, 24),
+        label(custom.final, `custom recommendation ${eur(custom.final)}`, VIOLET, customRight, 24),
       ],
       legend: { orientation: "h", y: -0.32 },  // four entries: lower than the default so it clears the axis title
-      margin: { l: 70, r: 30, t: 75, b: 60 },
+      margin: { l: 70, r: 20, t: 75, b: 60 },
     },
   };
 }

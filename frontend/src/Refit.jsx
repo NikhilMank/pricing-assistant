@@ -233,6 +233,7 @@ function ProductResult({ data, options, official, officialError, startMarket, ex
           <p className="muted">
             What we expect the profit to be if only the price were different. Blue is the official curve,
             violet the custom one. The dashed parts are outside the prices the shop has tested.
+            The vertical lines show the usual price and the two recommended prices.
           </p>
           <Plot data={compareChart.data} layout={compareChart.layout} height={360} />
           {customMarket.custom.unrestricted && (
