@@ -6,8 +6,9 @@ Checks, for a handful of example cases:
   3. price safety    final price is not below cost and is inside the allowed range
   4. tier rules      low tier holds the usual price, medium moves at most 5%
   5. reject          a rejected proposal falls back to the usual price
-  6. revision cap    the strategist runs at most twice
-Plus a few tests of the safety rules and the revision loop with deliberately bad inputs.
+  6. revision cap    the loop stops after MAX_STRATEGIST_RUNS passes (and after a time limit)
+Plus a few tests of the safety rules and the revision loop with deliberately bad inputs: the reviewer sees the
+analysis, sends weak analyses back to the analyst and weak proposals back to the strategist, and uses its own model.
 Plus tests of the custom refit (no model needed): with default options it reproduces the saved official numbers,
 its prices obey the same rules, and invalid options are rejected.
 
@@ -21,6 +22,8 @@ import math
 import os
 import re
 import sys
+import time
+import types
 
 if "--live" not in sys.argv:
     os.environ["LLM_PROVIDER"] = "fake"
@@ -163,20 +166,267 @@ def rule_tests() -> None:
     check(mentions_promotions(["Without the weeks with promotions the effect looks weaker."]),
           "the promotion-mention check accepts a text that mentions it")
 
-    saved = (os.environ.get("LLM_PROVIDER"), os.environ.get("FAKE_REVIEWER_VERDICT"))
+    saved = {k: os.environ.get(k) for k in ("LLM_PROVIDER", "FAKE_REVIEWER_VERDICT", "FAKE_REVIEWER_FIX")}
+    saved_limit = agents.LOOP_SECONDS_LIMIT
     os.environ["LLM_PROVIDER"] = "fake"
-    for verdict in ("adjust", "reject"):
+    cap = agents.MAX_STRATEGIST_RUNS
+
+    def run_fake(verdict, fix=None):
         os.environ["FAKE_REVIEWER_VERDICT"] = verdict
+        os.environ.pop("FAKE_REVIEWER_FIX", None)
+        if fix:
+            os.environ["FAKE_REVIEWER_FIX"] = fix
         agents._cache.clear()
-        r = agents.analyze("SKU-1015", "DE")
-        runs_ok = r["strategist_runs"] == (2 if verdict == "adjust" else 1)
-        check(runs_ok, f"reviewer says '{verdict}': strategist runs {2 if verdict == 'adjust' else 1} time(s)",
-              f"{r['strategist_runs']}")
+        return agents.analyze("SKU-1015", "DE")
+
+    # 'adjust' every time: the loop stops at the cap and the usual price is shown. 'reject' ends it at once.
+    for verdict in ("adjust", "reject"):
+        r = run_fake(verdict)
+        want = cap if verdict == "adjust" else 1
+        check(r["strategist_runs"] == want, f"reviewer says '{verdict}': strategist runs {want} time(s)", f"{r['strategist_runs']}")
         check(r["final"]["status"] == "rejected" and r["final"]["price"] == payload["usual_price"],
               f"reviewer says '{verdict}': usual price is shown")
-    os.environ.pop("FAKE_REVIEWER_VERDICT", None)
-    if saved[0]:
-        os.environ["LLM_PROVIDER"] = saved[0]
+    check(cap == 3, "the revision cap is 3 passes (the first one and two revisions)", f"{cap}")
+
+    # 'adjust' once, then 'approve': where the fix starts decides how often the analyst runs
+    for fix, analyst_runs in (("proposal", 1), ("analysis", 2), ("something odd", 1)):
+        r = run_fake("adjust_once", fix)
+        check(r["strategist_runs"] == 2 and r["analyst_runs"] == analyst_runs,
+              f"fix starts at '{fix}': analyst runs {analyst_runs}, strategist 2",
+              f"analyst {r['analyst_runs']}, strategist {r['strategist_runs']}")
+        check(r["final"]["status"] == "approved" and not agents.price_violations(payload, r["final"]["price"]),
+              f"fix starts at '{fix}': the second pass is approved")
+    r = run_fake("adjust", "analysis")
+    check(r["analyst_runs"] == cap and r["strategist_runs"] == cap and r["final"]["status"] == "rejected",
+          "analysis sent back every time: stops at the cap, usual price shown", f"{r['analyst_runs']}/{r['strategist_runs']}")
+
+    # a repeat review also gets the earlier reviews (with the analysis and proposal they judged)
+    reviewer_messages = []
+
+    class SpyReviews(agents.FakeChat):
+        def invoke(self, messages):
+            if "ROLE: reviewer" in messages[0].content:
+                reviewer_messages.append(messages[1].content)
+            return super().invoke(messages)
+
+    os.environ["FAKE_REVIEWER_VERDICT"], os.environ["FAKE_REVIEWER_FIX"] = "adjust_once", "analysis"
+    state = agents.build_graph(SpyReviews()).invoke({"payload": payload, "started_at": time.monotonic()})
+    check(len(reviewer_messages) == 2 and "EARLIER REVIEWS" not in reviewer_messages[0],
+          "the first review has no earlier reviews", f"{len(reviewer_messages)} reviews")
+    first_summary = state["history"][0]["analysis"]["summary"]
+    check("EARLIER REVIEWS: " in reviewer_messages[1] and first_summary in reviewer_messages[1]
+          and state["history"][0]["comment"] in reviewer_messages[1],
+          "the second review sees the first analysis, the first proposal and its own earlier comment")
+    check(len(state["history"]) == 2 and [h["review_number"] for h in state["history"]] == [1, 2],
+          "every review is kept in the history")
+
+    # the analyst and the strategist also see their own earlier attempts that were sent back, with the reviewer's comment
+    sent = {"analyst": [], "strategist": []}
+
+    class SpyAttempts(agents.FakeChat):
+        def invoke(self, messages):
+            for role in sent:
+                if f"ROLE: {role}" in messages[0].content:
+                    sent[role].append(messages[1].content)
+            return super().invoke(messages)
+
+    for fix, role in (("analysis", "analyst"), ("proposal", "strategist")):
+        sent["analyst"].clear(); sent["strategist"].clear()
+        os.environ["FAKE_REVIEWER_VERDICT"], os.environ["FAKE_REVIEWER_FIX"] = "adjust", fix
+        state = agents.build_graph(SpyAttempts()).invoke({"payload": payload, "started_at": time.monotonic()})
+        messages = sent[role]
+        check("EARLIER ATTEMPTS" not in messages[0] and "EARLIER ATTEMPTS" not in messages[1],
+              f"the {role}: no earlier attempts on the first and second run")
+        first = state["history"][0]["analysis" if role == "analyst" else "proposal"]
+        key = "summary" if role == "analyst" else "reasoning"
+        check("EARLIER ATTEMPTS: " in messages[2] and first[key] in messages[2] and state["history"][0]["comment"] in messages[2],
+              f"the {role}: the third run sees its first attempt and the reviewer's comment on it")
+    check(all("EARLIER ATTEMPTS" not in m for m in sent["analyst"]), "the analyst is not shown proposals that were sent back")
+
+    # a rate limit or a slow model ends quickly with a short message (no minutes of waiting)
+    class Flaky:
+        def __init__(self, *errors):
+            self.errors, self.calls = list(errors), 0
+
+        def invoke(self, messages):
+            self.calls += 1
+            if self.errors:
+                raise self.errors.pop(0)
+            return "answer"
+
+    rate_limit = Exception("429 RESOURCE_EXHAUSTED. Resource exhausted. Please try again later.")
+    dropped = type("RemoteProtocolError", (Exception,), {})("peer closed connection without sending complete message body")
+    llm = Flaky(dropped)
+    check(agents.invoke_with_retry(llm, [], waits=(0, 0)) == "answer" and llm.calls == 2, "a dropped connection is waited out and tried again")
+    llm = Flaky(rate_limit, rate_limit)
+    check(agents.invoke_with_retry(llm, [], waits=(0, 0)) == "answer" and llm.calls == 3, "two rate limits in a row are waited out and the third try works")
+    llm = Flaky(rate_limit, rate_limit, rate_limit, rate_limit)
+    try:
+        agents.invoke_with_retry(llm, [], waits=(0, 0))
+        busy_ok = False
+    except agents.ModelBusyError as e:
+        busy_ok = llm.calls == 3 and "models are busy" in str(e) and "not a fault in this app" in str(e)
+    check(busy_ok, "a rate limit that stays ends after 3 tries with a short message that says it is on the provider's side")
+    llm = Flaky(Exception("504 DEADLINE_EXCEEDED: the request timed out"))
+    try:
+        agents.invoke_with_retry(llm, [], waits=(0, 0))
+        slow_ok = False
+    except agents.ModelBusyError as e:
+        slow_ok = llm.calls == 1 and "took too long" in str(e) and "not a fault in this app" in str(e)
+    check(slow_ok, "a call that is too slow ends at once (no second try) with a 'took too long' message")
+    llm = Flaky(ValueError("bad request"))
+    try:
+        agents.invoke_with_retry(llm, [], waits=(0, 0))
+        other_ok = False
+    except ValueError:
+        other_ok = llm.calls == 1
+    check(other_ok, "any other error is passed on unchanged")
+    check(issubclass(agents.ModelBusyError, RuntimeError), "the busy error is a RuntimeError, so the API answers 429 with its message")
+    from fastapi.testclient import TestClient
+    from app import main as api_main
+    real_analyze = agents.analyze
+
+    def busy_analyze(*args, **kwargs):
+        raise agents.ModelBusyError(f"{agents.provider_name()} AI models are busy right now (too many requests). Please try again in a minute.")
+
+    agents.analyze = busy_analyze
+    answer = TestClient(api_main.app).post("/api/analyze/SKU-1015/DE")
+    agents.analyze = real_analyze
+    check(answer.status_code == 429 and "busy" in answer.json()["detail"], "the API answers 429 with the busy message", f"{answer.status_code} {answer.text[:80]}")
+
+    # time limit: with no time left the first 'adjust' is final
+    agents.LOOP_SECONDS_LIMIT = -1
+    r = run_fake("adjust")
+    check(r["strategist_runs"] == 1 and r["final"]["price"] == payload["usual_price"], "time limit reached: no further revision, usual price shown")
+    agents.LOOP_SECONDS_LIMIT = saved_limit
+
+    # the reviewer gets the data, the analysis the analyst wrote and the proposal
+    seen = []
+
+    class Spy(agents.FakeChat):
+        def invoke(self, messages):
+            seen.append((messages[0].content, messages[1].content))
+            return super().invoke(messages)
+
+    os.environ["FAKE_REVIEWER_VERDICT"] = "approve"
+    state = agents.build_graph(Spy()).invoke({"payload": payload, "started_at": time.monotonic()})
+    to_reviewer = next(user for system, user in seen if "ROLE: reviewer" in system)
+    check("DATA: " in to_reviewer and "ANALYSIS: " in to_reviewer and "PROPOSAL: " in to_reviewer
+          and state["analysis"]["summary"] in to_reviewer and payload["product_name"] in to_reviewer,
+          "the reviewer receives the data, the analysis and the proposal")
+
+    # model hierarchies: each agent has its own first choice, then the others, best first (the Google client is
+    # replaced by a recorder: nothing is called)
+    calls = []
+    fake_module = types.ModuleType("langchain_google_genai")
+    fake_module.ChatGoogleGenerativeAI = lambda **kw: calls.append(kw) or kw
+    saved_module = sys.modules.get("langchain_google_genai")
+    sys.modules["langchain_google_genai"] = fake_module
+    env_names = ("VERTEX_MODEL", "VERTEX_REASONING", "VERTEX_REVIEWER_MODEL", "VERTEX_REVIEWER_REASONING", "VERTEX_MODEL_HIERARCHY")
+    saved_env = {k: os.environ.pop(k, None) for k in env_names}
+    os.environ["LLM_PROVIDER"] = "vertex"
+    agent_chat, reviewer_chat = agents.get_chat_model(), agents.get_chat_model("reviewer")
+    check(agent_chat.models == ["gemini-4-hydrogen", "gemini-4-argon", "gemini-4-carbon", "gemini-3.8-flash"],
+          "analyst and strategist: hydrogen first, then argon, carbon and the older 3.8 flash", f"{agent_chat.models}")
+    check(reviewer_chat.models == ["gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen", "gemini-3.8-flash"],
+          "reviewer: argon first, then carbon, hydrogen and the older 3.8 flash", f"{reviewer_chat.models}")
+    check(agent_chat.build("gemini-4-hydrogen")["reasoning_effort"] == "high" and reviewer_chat.build("gemini-4-argon")["reasoning_effort"] == "high",
+          "all three agents think at a high level")
+    check(agent_chat.build("gemini-4-hydrogen")["timeout"] == agents.CALL_TIMEOUT and reviewer_chat.build("gemini-4-argon")["timeout"] == agents.REVIEWER_CALL_TIMEOUT
+          and agent_chat.build("gemini-3.8-flash")["timeout"] == agents.LAST_RESORT_TIMEOUT,
+          "a slow model is given up on early; the last model of the list gets a longer timeout")
+    os.environ["VERTEX_REVIEWER_MODEL"], os.environ["VERTEX_REVIEWER_REASONING"] = "other-model", "medium"
+    os.environ["VERTEX_MODEL_HIERARCHY"] = "m1,m2"
+    other = agents.get_chat_model("reviewer")
+    check(other.models == ["other-model", "m1", "m2"] and other.build("m1")["reasoning_effort"] == "medium",
+          "reviewer model, hierarchy and reasoning can be set by environment variables", f"{other.models}")
+    for k, v in saved_env.items():
+        os.environ.pop(k, None)
+        if v is not None:
+            os.environ[k] = v
+    if saved_module is None:
+        sys.modules.pop("langchain_google_genai", None)
+    else:
+        sys.modules["langchain_google_genai"] = saved_module
+
+    # failover: a model that is busy, too slow or not available is skipped; other errors are not hidden
+    class Model:
+        def __init__(self, name, error=None):
+            self.name, self.error, self.calls = name, error, 0
+
+        def invoke(self, messages):
+            self.calls += 1
+            if self.error:
+                raise self.error
+            return self.name
+
+    def chain(*specs):
+        agents._cooling.clear()
+        models = {n: Model(n, err) for n, err in specs}
+        return agents.FallbackChat([n for n, _ in specs], lambda name: models[name]), models
+
+    busy = Exception("429 RESOURCE_EXHAUSTED. Resource exhausted.")
+    gone = Exception("404 NOT_FOUND: model not found for this project")
+    c, m = chain(("a", busy), ("b", None), ("c", None))
+    check(c.invoke([]) == "b" and c.used == "b" and m["c"].calls == 0, "a busy model is skipped: the next one answers")
+    c, m = chain(("a", gone), ("b", Exception("504 DEADLINE_EXCEEDED: timed out")), ("c", None))
+    check(c.invoke([]) == "c" and c.used == "c", "an unavailable model and a slow model are skipped: the third answers")
+    c, m = chain(("a", ValueError("bad request")), ("b", None))
+    try:
+        c.invoke([])
+        hidden = True
+    except ValueError:
+        hidden = m["b"].calls > 0
+    check(not hidden, "any other error is not hidden by the fallback")
+    c, m = chain(("a", busy), ("b", busy), ("c", busy))
+    try:
+        agents.invoke_with_retry(c, [], waits=(0, 0))
+        all_ok = False
+    except agents.ModelBusyError:
+        all_ok = all(x.calls == 3 for x in m.values())
+    check(all_ok, "all models busy: every model is tried in 3 rounds, then the short busy message")
+    saved_chain_limit = agents.CHAIN_SECONDS_LIMIT
+    agents.CHAIN_SECONDS_LIMIT = -1
+    c, m = chain(("a", busy), ("b", None))
+    try:
+        c.invoke([])
+        stopped = False
+    except Exception:
+        stopped = m["b"].calls == 0
+    agents.CHAIN_SECONDS_LIMIT = saved_chain_limit
+    check(stopped, "no time left: the next model is not tried")
+
+    # a model that just failed is skipped for a while, so the next call does not wait for it again
+    c, m = chain(("a", busy), ("b", None))
+    c.invoke([]); c.invoke([])
+    check(m["a"].calls == 1 and m["b"].calls == 2, "a busy model is skipped on the next call (tried once, not twice)", f"{m['a'].calls}/{m['b'].calls}")
+    c, m = chain(("a", busy), ("b", busy))
+    for _ in range(2):
+        try:
+            c.invoke([])
+        except Exception:
+            pass
+    check(m["a"].calls == 2 and m["b"].calls == 2, "if every model is cooling down, all of them are tried again")
+    c, m = chain(("a", gone), ("b", None))
+    agents._cooling["a"] = time.monotonic() + 1000
+    c.invoke([])
+    agents._cooling.clear()
+    check(m["a"].calls == 0, "a model in its cool-down period is not called")
+
+    # the result says which model answered for each agent
+    plain = agents.FakeChat()
+    agents._cooling.clear()
+    agent_chat = agents.FallbackChat(["a", "b"], lambda n: plain if n == "b" else Flaky(busy, busy, busy, busy))
+    reviewer_chat = agents.FallbackChat(["r", "s"], lambda n: plain)
+    os.environ["FAKE_REVIEWER_VERDICT"] = "approve"
+    state = agents.build_graph(agent_chat, reviewer_chat).invoke({"payload": payload, "started_at": time.monotonic()})
+    check(state["models"] == {"analyst": {"model": "b", "preferred": "a"}, "strategist": {"model": "b", "preferred": "a"},
+                              "reviewer": {"model": "r", "preferred": "r"}}, "the result shows which model answered for each agent", f"{state['models']}")
+
+    for k, v in saved.items():
+        os.environ.pop(k, None)
+        if v is not None:
+            os.environ[k] = v
     agents._cache.clear()
 
 

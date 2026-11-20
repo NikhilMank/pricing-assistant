@@ -80,7 +80,7 @@ resource "google_cloud_run_v2_service" "app" {
 
   template {
     service_account = google_service_account.run.email
-    timeout         = "300s"
+    timeout         = "600s"
 
     scaling {
       min_instance_count = 0 # scales to zero when nobody uses it (no cost)
