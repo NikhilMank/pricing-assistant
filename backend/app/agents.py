@@ -19,7 +19,7 @@ from typing import TypedDict
 from app.store import find_series, results
 
 MAX_STRATEGIST_RUNS = 3  # first proposal + at most two revisions (each pass through the strategist is one review)
-LOOP_SECONDS_LIMIT = 200  # another pass only starts if it should end before this: Cloud Run ends a request after 600 seconds
+LOOP_SECONDS_LIMIT = 300  # Cloud Run ends a request after 600 seconds, so a new pass only starts if it is expected to end before 300 seconds (room is left for a slow pass)
 # Seconds one model call may take. Normal calls take 10 to 30 seconds; some hang for minutes, so a model is given up on
 # early and the next one answers. The last model of a list has no fallback and is slower, so it gets longer.
 CALL_TIMEOUT = 45  # the analyst and the strategist
