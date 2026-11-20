@@ -283,12 +283,13 @@ def rule_tests() -> None:
     fake_module.ChatGoogleGenerativeAI = lambda **kw: calls.append(kw) or kw
     saved_module = sys.modules.get("langchain_google_genai")
     sys.modules["langchain_google_genai"] = fake_module
-    env_names = ("VERTEX_MODEL", "VERTEX_REASONING", "VERTEX_REVIEWER_MODEL", "VERTEX_REVIEWER_REASONING", "VERTEX_MODEL_HIERARCHY")
+    env_names = ("VERTEX_MODEL", "VERTEX_REASONING", "VERTEX_REVIEWER_MODEL", "VERTEX_REVIEWER_REASONING", "VERTEX_MODEL_HIERARCHY", "VERTEX_AGENT_HIERARCHY")
     saved_env = {k: os.environ.pop(k, None) for k in env_names}
     os.environ["LLM_PROVIDER"] = "vertex"
     agent_chat, reviewer_chat = agents.get_chat_model(), agents.get_chat_model("reviewer")
-    check(agent_chat.models == ["gemini-4-hydrogen", "gemini-4-argon", "gemini-4-carbon", "gemini-3.8-flash"],
-          "analyst and strategist: hydrogen first, then argon, carbon and the older 3.8 flash", f"{agent_chat.models}")
+    check(agent_chat.models == ["gemini-4-carbon", "gemini-4-hydrogen", "gemini-3.8-flash"],
+          "analyst and strategist: carbon first, then hydrogen and the older 3.8 flash", f"{agent_chat.models}")
+    check("gemini-4-argon" not in agent_chat.models, "analyst and strategist never use argon", f"{agent_chat.models}")
     check(reviewer_chat.models == ["gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen", "gemini-3.8-flash"],
           "reviewer: argon first, then carbon, hydrogen and the older 3.8 flash", f"{reviewer_chat.models}")
     check(agent_chat.build("gemini-4-hydrogen")["reasoning_effort"] == "high" and reviewer_chat.build("gemini-4-argon")["reasoning_effort"] == "high",
@@ -301,6 +302,16 @@ def rule_tests() -> None:
     other = agents.get_chat_model("reviewer")
     check(other.models == ["other-model", "m1", "m2"] and other.build("m1")["reasoning_effort"] == "medium",
           "reviewer model, hierarchy and reasoning can be set by environment variables", f"{other.models}")
+    os.environ["VERTEX_MODEL"], os.environ["VERTEX_AGENT_HIERARCHY"] = "own-model", "a1, own-model,a2,a1"
+    own = agents.get_chat_model()
+    check(own.models == ["own-model", "a1", "a2"],
+          "analyst and strategist: their own model first, then their list in order, without duplicates", f"{own.models}")
+    check(agents.get_chat_model("reviewer").models == ["other-model", "m1", "m2"],
+          "the reviewer's list is not changed by VERTEX_AGENT_HIERARCHY", f"{agents.get_chat_model('reviewer').models}")
+    os.environ["VERTEX_REVIEWER_MODEL"], os.environ["VERTEX_MODEL_HIERARCHY"] = "r2", "r3,r4"
+    check(agents.get_chat_model().models == ["own-model", "a1", "a2"] and agents.get_chat_model("reviewer").models == ["r2", "r3", "r4"],
+          "the agents' list is not changed by the reviewer's variables (VERTEX_REVIEWER_MODEL, VERTEX_MODEL_HIERARCHY)",
+          f"{agents.get_chat_model().models}")
 
     for k, v in saved_env.items():
         os.environ.pop(k, None)

@@ -181,18 +181,25 @@ def model_info(llm) -> dict | None:
 def get_chat_model(role: str = "agent"):
     """One place that decides which model is used. LLM_PROVIDER=vertex (default, Gemini on Google Cloud), bedrock (Claude on AWS) or fake.
     role="agent" is for the analyst and the strategist, role="reviewer" for the risk reviewer, which gets a stronger
-    model (VERTEX_REVIEWER_MODEL, BEDROCK_REVIEWER_MODEL_ID). On Vertex each role has a hierarchy: its own model first,
-    then the others of VERTEX_MODEL_HIERARCHY (best first), used one after the other if a model is busy or unavailable."""
+    model (VERTEX_REVIEWER_MODEL, BEDROCK_REVIEWER_MODEL_ID). On Vertex each role has a list of models: its own model first,
+    then its own hierarchy in order, without duplicates. The analyst and the strategist use VERTEX_MODEL and
+    VERTEX_AGENT_HIERARCHY (carbon, hydrogen, 3.8 flash, never argon); the reviewer uses VERTEX_REVIEWER_MODEL and
+    VERTEX_MODEL_HIERARCHY (argon, carbon, hydrogen, 3.8 flash). The next model is used if one is busy or unavailable."""
     provider = os.environ.get("LLM_PROVIDER", "vertex")
     reviewer = role == "reviewer"
     if provider == "fake":
         return FakeChat()
     if provider == "vertex":
-        hierarchy = [m.strip() for m in os.environ.get("VERTEX_MODEL_HIERARCHY", "gemini-4-argon,gemini-4-carbon,gemini-4-hydrogen,gemini-3.8-flash").split(",") if m.strip()]
-        first = os.environ.get("VERTEX_REVIEWER_MODEL", "gemini-4-argon") if reviewer else os.environ.get("VERTEX_MODEL", "gemini-4-hydrogen")
+        if reviewer:
+            listed = os.environ.get("VERTEX_MODEL_HIERARCHY", "gemini-4-argon,gemini-4-carbon,gemini-4-hydrogen,gemini-3.8-flash")
+            first = os.environ.get("VERTEX_REVIEWER_MODEL", "gemini-4-argon")
+        else:
+            listed = os.environ.get("VERTEX_AGENT_HIERARCHY", "gemini-4-carbon,gemini-4-hydrogen,gemini-3.8-flash")
+            first = os.environ.get("VERTEX_MODEL", "gemini-4-carbon")
+        hierarchy = [m.strip() for m in listed.split(",") if m.strip()]
         effort = os.environ.get("VERTEX_REVIEWER_REASONING", "high") if reviewer else os.environ.get("VERTEX_REASONING", "high")
 
-        names = [first] + [m for m in hierarchy if m != first]
+        names = list(dict.fromkeys([first] + hierarchy))  # its own model first, then its list in order, no duplicates
 
         def build(name):
             from langchain_google_genai import ChatGoogleGenerativeAI  # imported here so startup stays fast

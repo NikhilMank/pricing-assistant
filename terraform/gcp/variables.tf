@@ -10,9 +10,9 @@ variable "region" {
 }
 
 variable "vertex_model" {
-  description = "Gemini model used by the agents"
+  description = "Gemini model the analyst and the strategist try first (the reviewer has its own model, set in the code)"
   type        = string
-  default     = "gemini-4-hydrogen"
+  default     = "gemini-4-carbon"
 }
 
 variable "image_tag" {
