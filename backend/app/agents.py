@@ -16,6 +16,7 @@ import re
 import time
 from typing import TypedDict
 
+from app.checks import run_checks
 from app.store import find_series, results
 
 MAX_STRATEGIST_RUNS = 3  # first proposal + at most two revisions (each pass through the strategist is one review)
@@ -475,6 +476,7 @@ def analyze(product_id: str, market: str) -> dict:
            "analysis": state["analysis"], "proposal": state["proposal"], "review": state["review"],
            "analyst_runs": state["analyst_runs"], "strategist_runs": state["strategist_runs"],
            "models": state.get("models", {}), "final": state["final"]}
+    out["checks"] = run_checks(out)  # plain Python, no model call; shown on the product page, never changes the price
     _cache[key] = out
     return {**out, "cached": False}
 

@@ -75,6 +75,25 @@ export default function AgentCards({ id, market }) {
               <ModelNote info={current.models?.reviewer} />
             </div>
           </div>
+          {current.checks?.length > 0 && (
+            <div className="agent" style={{ marginTop: 12 }}>
+              <h3>Automatic checks on this answer (no AI involved)</h3>
+              {current.checks.map((c) =>
+                c.passed ? (
+                  <p key={c.id} className="muted">
+                    <span aria-label="passed">✓</span> {c.label}
+                  </p>
+                ) : (
+                  <p key={c.id} className="error">
+                    <span aria-label="failed">✗</span> {c.label}: {c.detail}
+                  </p>
+                )
+              )}
+              {current.checks.some((c) => !c.passed) && (
+                <p className="muted small">A failed check does not change the price shown above.</p>
+              )}
+            </div>
+          )}
           {current.cached && <p className="muted">Shown from the cache.</p>}
         </>
       )}

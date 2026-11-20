@@ -17,10 +17,10 @@ Run from the backend folder:
   ../.venv/bin/python -W ignore evals.py --live   with the real model (Gemini on Vertex AI, or LLM_PROVIDER=bedrock for Claude on Bedrock)
 Exit code is 1 if any check fails.
 """
+import copy
 import importlib.util
 import math
 import os
-import re
 import sys
 import time
 import types
@@ -33,6 +33,10 @@ else:
 
 from app import agents  # noqa: E402  (after the environment is set)
 from app.store import find_series, results  # noqa: E402
+from app.checks import (  # noqa: E402  (the check logic is shared with the live analysis, see app/checks.py)
+    analysis_texts, analyst_mentions_promotions, check_structure, cited_numbers, low_tier_holds_usual,
+    medium_move_percent, medium_tier_within_cap, mentions_promotions, number_is_known, payload_numbers,
+    price_in_allowed_range, price_not_below_cost, run_checks, unknown_numbers)
 
 # Example cases. "expect" are facts about the case itself, to notice if the data or model ever changes.
 CASES = [
@@ -43,12 +47,6 @@ CASES = [
     {"id": "SKU-1003", "market": "CH", "why": "latest price differs from the usual price", "expect": {}, "latest_differs": True},
 ]
 
-# Numbers that may appear without being in the payload: our own rules (5% cap, 14 days, 20% range) and the
-# "1%" in the usual way of explaining elasticity ("for every 1% price increase, sales drop by about X%").
-ALLOWED_CONSTANTS = {1.0, 5.0, 14.0, 20.0}
-VERDICTS = {"approve", "adjust", "reject"}
-ACTIONS = {"hold", "raise", "cut", "test_price"}
-
 failures = 0
 
 
@@ -56,37 +54,6 @@ def check(ok: bool, label: str, detail: str = "") -> None:
     global failures
     print(f"    [{'PASS' if ok else 'FAIL'}] {label}" + (f": {detail}" if detail and not ok else ""))
     failures += 0 if ok else 1
-
-
-def payload_numbers(payload: dict) -> set[float]:
-    """All numbers we gave the agents (absolute values, so '-1.98' and '1.98' both count)."""
-    return {abs(float(v)) for v in payload.values() if isinstance(v, (int, float)) and not isinstance(v, bool)}
-
-
-def cited_numbers(texts: list[str], payload: dict) -> list[float]:
-    """Numbers written in the agents' texts, ignoring product ids like SKU-1000."""
-    found = []
-    for text in texts:
-        cleaned = re.sub(r"SKU-\d+", "", text)
-        found += [abs(float(x)) for x in re.findall(r"-?\d+(?:\.\d+)?", cleaned.replace("−", "-"))]
-    return found
-
-
-def number_is_known(x: float, known: set[float]) -> bool:
-    return x in ALLOWED_CONSTANTS or any(math.isclose(x, v, abs_tol=0.051) for v in known)
-
-
-def mentions_promotions(texts: list[str]) -> bool:
-    return any("promotion" in text.lower() for text in texts)
-
-
-def check_structure(r: dict) -> bool:
-    a, p, rv, f = r["analysis"], r["proposal"], r["review"], r["final"]
-    return (all(isinstance(a.get(k), str) and a[k] for k in ("summary", "confidence_note", "caveat"))
-            and p.get("action") in ACTIONS and isinstance(p.get("price"), (int, float))
-            and isinstance(p.get("reasoning"), str)
-            and rv.get("verdict") in VERDICTS and isinstance(rv.get("comment"), str)
-            and isinstance(f.get("price"), (int, float)) and f.get("status") in {"approved", "rejected"})
 
 
 def run_case(case: dict) -> None:
@@ -109,29 +76,23 @@ def run_case(case: dict) -> None:
     check("ad_spend" not in str(p), "no ad spend is given to the agents")
     check(check_structure(r), "output structure is valid")
 
-    texts = [r["analysis"]["summary"], r["analysis"]["confidence_note"], r["analysis"]["caveat"],
-             r["proposal"]["reasoning"], r["review"]["comment"]]
-    known = payload_numbers(p)
-    unknown = [x for x in cited_numbers(texts, p) if not number_is_known(x, known)]
+    unknown = unknown_numbers(r)
     check(not unknown, "every cited number appears in the input data", f"not in data: {unknown}")
     if unknown and "--show" in sys.argv:
-        for t in texts:
+        for t in analysis_texts(r):
             print("      text:", t)
 
     if p["promotion_check"] in ("weaker", "noisy"):
-        a = r["analysis"]
-        check(mentions_promotions([a["summary"], a["confidence_note"], a["caveat"]]),
-              f"the analyst mentions the promotion check ({p['promotion_check']})")
+        check(analyst_mentions_promotions(r), f"the analyst mentions the promotion check ({p['promotion_check']})")
 
-    check(f["price"] >= p["unit_cost"], "final price is not below cost", f"{f['price']} < {p['unit_cost']}")
-    check(p["allowed_price_low"] - 0.005 <= f["price"] <= p["allowed_price_high"] + 0.005,
-          "final price is inside the allowed range", f"{f['price']}")
+    check(price_not_below_cost(p, f["price"]), "final price is not below cost", f"{f['price']} < {p['unit_cost']}")
+    check(price_in_allowed_range(p, f["price"]), "final price is inside the allowed range", f"{f['price']}")
 
     if p["confidence_tier"] == "low":
-        check(math.isclose(f["price"], p["usual_price"], abs_tol=0.005), "low tier holds the usual price", f"{f['price']}")
+        check(low_tier_holds_usual(p, f["price"]), "low tier holds the usual price", f"{f['price']}")
     if p["confidence_tier"] == "medium":
-        move = abs(f["price"] / p["usual_price"] - 1) * 100
-        check(move <= agents.MEDIUM_CAP_PCT + 0.05, "medium tier moves at most 5%", f"{move:.1f}%")
+        check(medium_tier_within_cap(p, f["price"], agents.MEDIUM_CAP_PCT), "medium tier moves at most 5%",
+              f"{medium_move_percent(p, f['price']):.1f}%")
     if f["status"] == "rejected":
         check(math.isclose(f["price"], p["usual_price"], abs_tol=0.005), "rejected gives the usual price", f"{f['price']}")
     check(r["strategist_runs"] <= agents.MAX_STRATEGIST_RUNS, "revision cap respected", f"{r['strategist_runs']} runs")
@@ -340,6 +301,7 @@ def rule_tests() -> None:
     other = agents.get_chat_model("reviewer")
     check(other.models == ["other-model", "m1", "m2"] and other.build("m1")["reasoning_effort"] == "medium",
           "reviewer model, hierarchy and reasoning can be set by environment variables", f"{other.models}")
+
     for k, v in saved_env.items():
         os.environ.pop(k, None)
         if v is not None:
@@ -439,6 +401,75 @@ REFIT_PRODUCTS = ["SKU-1000", "SKU-1013", "SKU-1015", "SKU-1006"]
 # Settings tried for the price rules; "min_tested_days" 7 and 28 change the allowed range, the last one changes the fit.
 REFIT_SETTINGS = [{}, {"min_tested_days": 7}, {"min_tested_days": 28}, {"exclude_promotion_days": True},
                   {"include_market": False}, {"include_weekday": False, "include_month": False}]
+
+
+def checks_tests() -> None:
+    """The automatic checks that run on every live analysis (app/checks.py): no model is called here. A good result
+    passes, and each kind of problem is caught by the check meant for it."""
+    print("\nAutomatic checks on an analysis (run_checks)")
+
+    def failed(r):
+        return {c["id"] for c in run_checks(r) if not c["passed"]}
+
+    def changed(r, edit):
+        bad = copy.deepcopy(r)
+        edit(bad)
+        return bad
+
+    good = {case["id"] + " " + case["market"]: agents.analyze(case["id"], case["market"]) for case in CASES}
+    for name, r in good.items():
+        shown = r.get("checks", [])
+        check(bool(shown) and all(c["passed"] for c in shown) and all(set(c) == {"id", "label", "passed", "detail"} for c in shown),
+              f"a good result passes every automatic check ({name})", f"failed: {sorted(failed(r))}")
+        check(r["checks"] == run_checks(r), f"the checks stored with the result are the same as a fresh run ({name})")
+        has_promo = any(c["id"] == "promotion_mention" for c in shown)
+        check(has_promo == (r["payload"]["promotion_check"] in ("weaker", "noisy")),
+              f"the promotion check is only listed when it found a problem ({name})", f"promotion_check {r['payload']['promotion_check']}")
+
+    r = good["SKU-1000 FR"]
+    p = r["payload"]
+    before = copy.deepcopy(r)
+    run_checks(r)
+    check(r == before, "running the checks does not change the result (price, tier, texts stay as they are)")
+
+    invented = changed(r, lambda x: x["proposal"].update(reasoning=x["proposal"]["reasoning"] + " A 10% price rise would cut sales by about 15%."))
+    got = {c["id"]: c for c in run_checks(invented)}
+    check(failed(invented) == {"cited_numbers"} and "15" in got["cited_numbers"]["detail"],
+          "a made-up number (15%) fails the numbers check and nothing else", f"failed: {sorted(failed(invented))}")
+
+    below = changed(r, lambda x: x["final"].update(price=p["unit_cost"] - 1))
+    check("not_below_cost" in failed(below) and "in_range" in failed(below), "a price below cost fails the cost check (and the range check)",
+          f"failed: {sorted(failed(below))}")
+    outside = changed(r, lambda x: x["final"].update(price=p["allowed_price_high"] + 5))
+    check("in_range" in failed(outside) and "not_below_cost" not in failed(outside), "a price above the allowed range fails the range check only",
+          f"failed: {sorted(failed(outside))}")
+    step = 1 if p["recommended_price"] >= p["usual_price"] else -1  # further than the recommendation, in the same direction
+    bolder = changed(r, lambda x: x["final"].update(price=p["recommended_price"] + step))
+    check("tier_rule" in failed(bolder), "a high tier price bolder than the recommendation fails the tier rule", f"failed: {sorted(failed(bolder))}")
+
+    low = good["SKU-1006 DE"]
+    moved = changed(low, lambda x: x["final"].update(price=low["payload"]["usual_price"] + 1))
+    check(low["payload"]["confidence_tier"] == "low" and failed(moved) >= {"tier_rule"}, "a low tier result that moves the price fails the tier rule",
+          f"failed: {sorted(failed(moved))}")
+    medium = good["SKU-1015 DE"]
+    big = changed(medium, lambda x: x["final"].update(price=round(medium["payload"]["usual_price"] * 1.08, 2)))
+    check(medium["payload"]["confidence_tier"] == "medium" and "tier_rule" in failed(big), "a medium tier move of 8% fails the tier rule",
+          f"failed: {sorted(failed(big))}")
+
+    many = changed(r, lambda x: x.update(strategist_runs=agents.MAX_STRATEGIST_RUNS + 1))
+    check(failed(many) == {"revision_cap"}, "too many strategist runs fail the revision check", f"failed: {sorted(failed(many))}")
+
+    check(p["promotion_check"] in ("weaker", "noisy"), "case setup: SKU-1000 FR has a promotion warning", p["promotion_check"])
+    ignored = changed(r, lambda x: x["analysis"].update(summary="Buyers are price-sensitive.", confidence_note="High.", caveat="Estimates are approximate."))
+    check(failed(ignored) == {"promotion_mention"}, "an analysis that ignores the promotion warning fails the promotion check", f"failed: {sorted(failed(ignored))}")
+
+    broken = changed(r, lambda x: x["analysis"].pop("summary"))
+    check("structure" in failed(broken), "a missing part of the answer fails the structure check", f"failed: {sorted(failed(broken))}")
+    try:
+        empty = run_checks({})
+        check(len(empty) == 1 and not empty[0]["passed"], "an incomplete result gives a failed check, not an error")
+    except Exception as e:
+        check(False, "an incomplete result gives a failed check, not an error", f"{type(e).__name__}")
 
 
 def refit_tests() -> None:
@@ -597,6 +628,7 @@ def main() -> int:
     for case in CASES:
         run_case(case)
     rule_tests()
+    checks_tests()
     refit_tests()
     print(f"\n{'ALL CHECKS PASSED' if failures == 0 else f'{failures} CHECK(S) FAILED'}")
     return 1 if failures else 0
