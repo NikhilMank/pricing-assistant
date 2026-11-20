@@ -97,13 +97,13 @@ export function curveSpec(m) {
     ],
     layout: {
       xaxis: { title: "Price (EUR)" },
-      yaxis: { title: "Model profit, Oct to Dec 2025 days (EUR)" },
+      yaxis: { title: "Model profit (EUR)<br>Oct to Dec 2025 days" },  // two lines: one long line was taller than the chart and got cut off
       shapes: [line(m.usual, GREY), line(m.final, GREEN)],
       annotations: [
         { x: m.usual, yref: "paper", y: 1.02, yanchor: "bottom", xanchor: "left", xshift: 6, text: "usual", showarrow: false, font: { color: "#3e4c59" } },
         { x: m.final, yref: "paper", y: 1.02, yanchor: "bottom", xanchor: "right", xshift: -6, text: "recommended", showarrow: false, font: { color: GREEN } },
       ],
-      margin: { l: 70, r: 30, t: 50, b: 45 },
+      margin: { l: 85, r: 30, t: 50, b: 45 },
     },
   };
 }
@@ -134,7 +134,7 @@ export function compareCurveSpec(official, custom) {
     ],
     layout: {
       xaxis: { title: "Price (EUR)" },
-      yaxis: { title: "Expected profit, Oct to Dec 2025 days (EUR)" },
+      yaxis: { title: "Expected profit (EUR)<br>Oct to Dec 2025 days" },  // two lines: one long line was taller than the chart and got cut off
       shapes: [line(official.usual, GREY), line(official.final, GREEN), line(custom.final, VIOLET)],
       annotations: [
         label(official.usual, `usual price ${eur(official.usual)}`, "#3e4c59", true, 4),
@@ -142,7 +142,7 @@ export function compareCurveSpec(official, custom) {
         label(custom.final, `custom recommendation ${eur(custom.final)}`, VIOLET, customRight, 24),
       ],
       legend: { orientation: "h", y: -0.32 },  // four entries: lower than the default so it clears the axis title
-      margin: { l: 70, r: 20, t: 75, b: 60 },
+      margin: { l: 85, r: 20, t: 75, b: 60 },
     },
   };
 }
