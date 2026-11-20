@@ -84,10 +84,36 @@ export function scatterSpec(m, weeks) {
   };
 }
 
+// The profit curve is calculated on a fixed grid of prices, so the first and last grid point inside the allowed range can
+// lie a little inside its edges. The solid line is therefore extended to the exact edges (a straight line between the two
+// neighbouring grid points), so a recommended price that sits exactly on an edge is not drawn outside the solid line.
+// This only changes how the line is drawn, not any number the app calculates.
+function testedPoints(curve, low, high) {
+  if (!(low < high)) return [];  // no usable range (custom refit with 7 or 28 days): nothing was tested, so no solid line
+  const first = curve[0].price, last = curve[curve.length - 1].price;
+  const at = (x) => {
+    const i = Math.max(0, curve.findIndex((p) => p.price >= x) - 1);
+    const a = curve[i], b = curve[Math.min(i + 1, curve.length - 1)];
+    return b.price === a.price ? a.profit : a.profit + ((b.profit - a.profit) * (x - a.price)) / (b.price - a.price);
+  };
+  const points = curve.filter((p) => p.price > low && p.price < high);
+  if (low >= first && low <= last) points.unshift({ price: low, profit: at(low) });
+  if (high >= first && high <= last) points.push({ price: high, profit: at(high) });
+  return points;
+}
+
 // The official profit curve: solid where the prices were tested, grey dashed where the model has no data
 export function curveSpec(m) {
-  const inRange = m.curve.filter((p) => p.in_range);
+  const inRange = testedPoints(m.curve, m.low, m.high);
   const line = (x, color) => ({ type: "line", x0: x, x1: x, yref: "paper", y0: 0, y1: 1, line: { color, width: 2, dash: "dot" } });
+  // The two labels sit on two rows (yshift is in pixels above the plot), each one on the side of its line that points to the
+  // middle of the chart, so they never touch each other and are not cut off at the edges.
+  const prices = m.curve.map((p) => p.price);
+  const lo = Math.min(...prices), hi = Math.max(...prices);
+  const label = (x, text, color, yshift) => {
+    const right = (x - lo) / (hi - lo) < 0.5;
+    return { x, yref: "paper", y: 1, yshift, yanchor: "bottom", xanchor: right ? "left" : "right", xshift: right ? 6 : -6, text, showarrow: false, font: { color, size: 12 } };
+  };
   return {
     data: [
       { type: "scatter", mode: "lines", name: "No data here: indication only", x: m.curve.map((p) => p.price),
@@ -97,13 +123,14 @@ export function curveSpec(m) {
     ],
     layout: {
       xaxis: { title: "Price (EUR)" },
-      yaxis: { title: "Model profit (EUR)<br>Oct to Dec 2025 days" },  // two lines: one long line was taller than the chart and got cut off
+      yaxis: { title: { text: "Model profit (EUR)<br>Oct to Dec 2025 days", standoff: 12 }, automargin: true },  // two lines: one long line was taller than the chart; room is kept for the numbers
       shapes: [line(m.usual, GREY), line(m.final, GREEN)],
       annotations: [
-        { x: m.usual, yref: "paper", y: 1.02, yanchor: "bottom", xanchor: "left", xshift: 6, text: "usual", showarrow: false, font: { color: "#3e4c59" } },
-        { x: m.final, yref: "paper", y: 1.02, yanchor: "bottom", xanchor: "right", xshift: -6, text: "recommended", showarrow: false, font: { color: GREEN } },
+        label(m.usual, `usual price ${eur(m.usual)}`, "#3e4c59", 4),
+        label(m.final, `recommended price ${eur(m.final)}`, GREEN, 24),
       ],
-      margin: { l: 85, r: 30, t: 50, b: 45 },
+      legend: { orientation: "h", yref: "container", y: 0, yanchor: "bottom" },  // pinned to the bottom edge so it never meets the x axis title
+      margin: { l: 85, r: 30, t: 50, b: 96 },
     },
   };
 }
@@ -111,7 +138,7 @@ export function curveSpec(m) {
 // Custom refit page: the official curve and the custom curve on the same axes.
 // official = one market of GET /api/product/{id}; custom = the custom part of one market of POST /api/refit/{id}?curves=true
 export function compareCurveSpec(official, custom) {
-  const tested = (curve) => curve.filter((p) => p.in_range);
+  const tested = (m) => testedPoints(m.curve, m.low, m.high);
   const line = (x, color) => ({ type: "line", x0: x, x1: x, yref: "paper", y0: 0, y1: 1, line: { color, width: 2, dash: "dot" } });
   // the lower of the two recommended prices gets its label on the left of its line, the higher one on the right
   const customRight = custom.final >= official.final;
@@ -125,24 +152,24 @@ export function compareCurveSpec(official, custom) {
     data: [
       { type: "scatter", mode: "lines", name: "Official: no data at these prices", x: official.curve.map((p) => p.price),
         y: official.curve.map((p) => p.profit), line: { color: GREY, dash: "dash", width: 2 } },
-      { type: "scatter", mode: "lines", name: "Official: prices the shop has tested", x: tested(official.curve).map((p) => p.price),
-        y: tested(official.curve).map((p) => p.profit), line: { color: BLUE, width: 6 }, opacity: 0.55 },
+      { type: "scatter", mode: "lines", name: "Official: prices the shop has tested", x: tested(official).map((p) => p.price),
+        y: tested(official).map((p) => p.profit), line: { color: BLUE, width: 6 }, opacity: 0.55 },
       { type: "scatter", mode: "lines", name: "Custom: no data at these prices", x: custom.curve.map((p) => p.price),
         y: custom.curve.map((p) => p.profit), line: { color: LIGHT_VIOLET, dash: "dash", width: 2 } },
-      { type: "scatter", mode: "lines", name: "Custom: prices the shop has tested", x: tested(custom.curve).map((p) => p.price),
-        y: tested(custom.curve).map((p) => p.profit), line: { color: VIOLET, width: 2.5 } },
+      { type: "scatter", mode: "lines", name: "Custom: prices the shop has tested", x: tested(custom).map((p) => p.price),
+        y: tested(custom).map((p) => p.profit), line: { color: VIOLET, width: 2.5 } },
     ],
     layout: {
       xaxis: { title: "Price (EUR)" },
-      yaxis: { title: "Expected profit (EUR)<br>Oct to Dec 2025 days" },  // two lines: one long line was taller than the chart and got cut off
+      yaxis: { title: { text: "Expected profit (EUR)<br>Oct to Dec 2025 days", standoff: 12 }, automargin: true },  // two lines: one long line was taller than the chart; room is kept for the numbers
       shapes: [line(official.usual, GREY), line(official.final, GREEN), line(custom.final, VIOLET)],
       annotations: [
         label(official.usual, `usual price ${eur(official.usual)}`, "#3e4c59", true, 4),
         label(official.final, `official recommendation ${eur(official.final)}`, GREEN, !customRight, 24),
         label(custom.final, `custom recommendation ${eur(custom.final)}`, VIOLET, customRight, 24),
       ],
-      legend: { orientation: "h", y: -0.32 },  // four entries: lower than the default so it clears the axis title
-      margin: { l: 85, r: 20, t: 75, b: 60 },
+      legend: { orientation: "h", yref: "container", y: 0, yanchor: "bottom" },  // four entries, pinned to the bottom edge so it never meets the x axis title
+      margin: { l: 85, r: 20, t: 75, b: 100 },
     },
   };
 }
