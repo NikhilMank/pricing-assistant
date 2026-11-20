@@ -34,7 +34,7 @@ export default function AgentCards({ id, market }) {
         also enforces the safety rules (never below cost, always inside the tested range).
       </p>
       <button className="primary" onClick={run} disabled={loading}>
-        {loading ? "Analysing… this can take a minute or longer" : current ? "Run again" : "Run AI analysis"}
+        {loading ? "Analysing… this may take a few minutes" : current ? "Run again" : "Run AI analysis"}
       </button>
       {error && <p className="error">{error}</p>}
 
